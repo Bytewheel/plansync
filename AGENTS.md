@@ -2,9 +2,10 @@
 
 plansync audits plan documentation (`PLAN.md`, `PLAN_NEXT_AGENT_*.md`,
 `CONTINUATION_PLAN.md`, roadmaps, handoff notes) against the actual state of
-the git repositories those plans describe. Use it instead of re-deriving by
-hand which parts of a plan still hold. It is read-only: it never modifies
-plans or repositories.
+the git repositories those plans describe, and syncs tool-owned regions back
+to current state. Use the audit instead of re-deriving by hand which parts of
+a plan still hold. `audit` is read-only; `sync` previews a diff and writes
+only with `--apply` (plus a `.bak` backup).
 
 Binary: `~/Documents/ByteWheel/plansync/bin/plansync`
 (rebuild: `cd ~/Documents/ByteWheel/plansync && env -u GOROOT go build -o bin/plansync ./cmd/plansync`)
@@ -54,18 +55,35 @@ claims individually.
 ## Session end — before handing off
 
 1. Run the audit again on the plan(s) you touched.
-2. Fix every `stale`/`moved`/`missing` finding by editing the plan:
-   - refresh the git-status block to the real working tree
-     (`git status --porcelain`);
-   - re-point moved anchors to the suggested `path:line`;
-   - update or delete claims about files that no longer exist;
-   - tick checkboxes for work you completed and verified.
+2. Fix every `stale`/`moved`/`missing` finding, either by hand or with
+   `plansync sync` (below).
 3. Re-run the audit until the plan is clean, then write the handoff note.
    A clean audit attached to the handoff is worth more than prose promising
    the plan is current.
 
-(M2 will automate step 2 with `plansync sync`; until then it is manual. See
-`docs/ROADMAP.md`.)
+### plansync sync
+
+```sh
+~/Documents/ByteWheel/plansync/bin/plansync sync <plan.md> --repo <repo> [--policy p] [--apply]
+```
+
+`sync` previews a diff by default and writes only with `--apply` (which makes
+a `<plan>.bak` backup unless `--no-backup`). After applying it re-audits and
+reports how many findings remain that it cannot fix automatically.
+
+Policies:
+
+| Policy | Rewrites |
+|---|---|
+| `markers` (default) | plansync marker regions + symbol-verified re-anchoring of moved `path:line` refs |
+| `heuristic` | markers, plus the most recent *unmarked* git-status block per repo (older blocks are doc-log history) and stale head-table commits |
+| `report` | computes the heuristic edit set but never writes |
+
+Re-anchoring only fires when the plan line names the symbol (`put_event` next
+to `methods.rs:59`) and that symbol is still in the file — it re-points, it
+never guesses. Anchors whose symbols are gone, missing paths, and numeric
+gate claims are always left for the human; the post-apply re-audit lists
+them.
 
 ## Reading the report
 
@@ -105,25 +123,30 @@ claims in the shapes the grammar reads (full spec in `docs/FORMAT-SPEC.md`):
 - Name test files with full paths (`tests/support_bundle.rs`), not bare names.
 - Keep `- [ ]` / `- [x]` checkboxes on their own lines for counting.
 
-### Marker blocks (for M2 `sync`)
+### Marker blocks
 
-Wrap regions the tool should own in marker comments now; they are already
-honoured as claim regions and M2 will rewrite them in place:
+Wrap regions the tool should own in marker comments; `plansync sync`
+rewrites everything between the markers in place (do not hand-edit inside
+them), and `plansync audit` verifies the refreshed claims like any other:
 
-```html
+````html
 <!-- plansync:begin git-status repo=~/router-dav/rustical -->
+```
  M src/foo.rs
+```
 <!-- plansync:end -->
 
 <!-- plansync:begin heads -->
 | repo | head |
 |---|---|
-| ~/router-dav/rustical | e30c90d9 |
+| `~/router-dav/rustical` | `e30c90d9` |
 <!-- plansync:end -->
-```
+````
 
-Never hand-edit inside markers when a plan has them; run the tool instead
-(`audit` in M1, `sync` from M2).
+Marker kinds: `git-status repo=PATH` (body: a fenced `git status --porcelain`
+dump, or `# clean (HEAD <hash>)`) and `heads` (body: a backticked repo/head
+table over the candidate repos). Do not wrap markers in an outer fence — the
+generated body brings its own where needed.
 
 ## Embedding in other repos
 

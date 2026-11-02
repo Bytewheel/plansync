@@ -33,6 +33,9 @@ type Result struct {
 	Repo       string     `json:"repo,omitempty"`
 	Message    string     `json:"message"`
 	Suggestion string     `json:"suggestion,omitempty"`
+	Start      int        `json:"start,omitempty"`
+	End        int        `json:"end,omitempty"`
+	Hash       string     `json:"hash,omitempty"`
 }
 
 type Verifier struct {
@@ -234,7 +237,7 @@ func (v *Verifier) verifyGitTree(c claim.Claim) Result {
 
 func (v *Verifier) verifyAnchor(c claim.Claim) Result {
 	res, ok := v.resolveFile(c.Path)
-	base := Result{Kind: c.Kind, Line: c.Line, Path: c.Path, Repo: res.repo}
+	base := Result{Kind: c.Kind, Line: c.Line, Path: c.Path, Repo: res.repo, Start: c.Start, End: c.End}
 	if !ok {
 		base.Status = StatusUnknown
 		base.Message = "file not found in any candidate repo"
@@ -384,7 +387,7 @@ func isSystemPath(p string) bool {
 }
 
 func (v *Verifier) verifyCommit(c claim.Claim) Result {
-	base := Result{Kind: c.Kind, Line: c.Line, Message: c.Hash}
+	base := Result{Kind: c.Kind, Line: c.Line, Message: c.Hash, Hash: c.Hash}
 	for _, r := range v.repos {
 		out, err := exec.Command("git", "-C", r, "cat-file", "-t", c.Hash).Output()
 		if err != nil || strings.TrimSpace(string(out)) == "" {
@@ -401,6 +404,7 @@ func (v *Verifier) verifyCommit(c claim.Claim) Result {
 		base.Repo = r
 		if v.headContext(c.Line) {
 			base.Status = StatusStale
+			base.Suggestion = v.headShort(r)
 			base.Message = fmt.Sprintf("claimed as head; HEAD of %s is now %s", r, v.headShort(r))
 			return base
 		}
@@ -637,3 +641,24 @@ func (v *Verifier) CommitsSince(date string) map[string]int {
 	}
 	return out
 }
+
+// HeadShort returns the short HEAD hash of root (cached per verifier).
+func (v *Verifier) HeadShort(root string) string { return v.headShort(root) }
+
+// PorcelainLines returns the raw `git status --porcelain=v1` lines of root.
+func (v *Verifier) PorcelainLines(root string) []string {
+	out, err := exec.Command("git", "-C", root, "status", "--porcelain=v1").Output()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines
+}
+
+// GitRootOf expands dir and returns its enclosing git worktree root, or "".
+func GitRootOf(dir string) string { return gitRoot(expandHome(dir)) }

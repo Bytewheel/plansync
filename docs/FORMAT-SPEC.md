@@ -127,7 +127,47 @@ freshness = ok / (ok + stale + moved + missing).
 JSON (`--json`): array of `{file, repos, results: [{kind, status, line,
 path?, repo?, message, suggestion?}], age_note, freshness}`.
 
-## 10. Known limitations
+## 10. Marker regions (sync)
+
+`plansync sync` rewrites the lines strictly between these HTML comments:
+
+```
+<!-- plansync:begin KIND ARGS -->
+…tool-owned body…
+<!-- plansync:end -->
+```
+
+- `begin` line grammar: `^\s*<!--\s*plansync:begin\s+([\w-]+)((?:\s+[\w-]+=[^\s>]+)*)\s*-->`
+- Kinds: `git-status` (required arg `repo=PATH`) and `heads`.
+- `git-status` body: a fenced (` ``` `) dump of the repo's current
+  `git status --porcelain=v1`, or `# clean (HEAD <short-hash>)` when clean.
+  Do not wrap the marker in an outer fence — the body brings its own.
+- `heads` body: `| repo | head |` table, one row per candidate repo, paths
+  and hashes backticked (so the next audit re-verifies them and the table
+  doubles as a repo hint).
+- Unclosed markers, unknown kinds, and non-worktree `repo=` paths produce
+  warnings and leave the region untouched.
+- The region body is ordinary claim text: `audit` parses it like any other
+  part of the document.
+
+## 11. Sync edit selection
+
+Policies and precedence (lower number wins on overlap):
+
+| prio | edit | policies |
+|---|---|---|
+| 0 | marker region refresh | all |
+| 1 | most-recent unmarked git-status block per repo | heuristic, report |
+| 2 | stale head-table commit hash → current HEAD | heuristic, report |
+| 3 | moved anchor re-point (`path:old` → `path:new`, or elided `:old` → `:new`) | all |
+
+Only the *most recent* git-status block per repo is refreshed under the
+heuristic policy: older blocks in doc-log style plans are history. Multiple
+rewrites on one document line are composed; single-line rewrites inside a
+range edit are dropped (the range owns the line). An empty marker region
+receives an insertion edit (Start = End+1).
+
+## 12. Known limitations
 
 - No rewrite capability yet (M2 `sync`); audit is strictly read-only.
 - Numeric gate claims are unverified without gate config.
@@ -136,3 +176,8 @@ path?, repo?, message, suggestion?}], age_note, freshness}`.
 - `?? dir/` untracked-dir shorthand in plans matches only if written
   file-by-file or as the exact dir path git prints.
 - Markdown links `[text](path)` are not parsed; only backticked spans are.
+- Heuristic git-tree refresh rewrites the whole block, dropping
+  parenthesised annotations (`(+59/-13 net: …)`); use markers to keep
+  annotated history safe.
+- Sync cannot fix: anchors whose symbols vanished, missing paths, numeric
+  gate claims, checkboxes. It reports them in the post-apply re-audit.

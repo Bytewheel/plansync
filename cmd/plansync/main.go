@@ -1,8 +1,10 @@
 // Command plansync audits plan documentation against the state of the code
-// repositories it describes, reporting claims that have gone stale.
+// repositories it describes, and syncs tool-owned plan regions back to
+// current repository state.
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"bytewheel/plansync/internal/claim"
 	"bytewheel/plansync/internal/report"
+	"bytewheel/plansync/internal/syncer"
 	"bytewheel/plansync/internal/verify"
 )
 
@@ -23,10 +26,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `plansync - audit plan documentation against repository state
+	fmt.Fprintf(os.Stderr, `plansync - audit and sync plan documentation against repository state
 
 Usage:
-  plansync audit [plans...] [flags]
+  plansync audit [plans...] [flags]     report claims that have gone stale
+  plansync sync  [plans...] [flags]     refresh tool-owned plan regions
 
 Arguments are plan files or directories (default: .). Directories are walked
 for markdown files whose names look like plans (plan, roadmap, todo,
@@ -35,18 +39,31 @@ continuation, next_agent). Repositories are discovered from the plan's own
 worktree; --repo adds more.
 
 Flags:
-  --repo path   candidate repository (repeatable)
-  --json        machine-readable output
-  --verbose     also print ok claims individually
-  --fail        exit non-zero when any stale/moved/missing claim is found
+  --repo path       candidate repository (repeatable)
+  --json            machine-readable output
+  --verbose         audit: also print ok claims individually
+  --fail            audit: exit non-zero on stale/moved/missing findings
+  --policy p        sync: markers (default) | heuristic | report
+  --apply           sync: write changes (default: preview diff only)
+  --no-backup       sync: skip the .bak backup when applying
+
+Sync policies:
+  markers     rewrite plansync marker regions and re-anchor moved
+              file:line anchors (symbol-verified) only
+  heuristic   markers, plus refreshing the most recent unmarked
+              git-status block per repo and stale head-table commits
+  report      compute the heuristic edit set but never write
 `)
 }
 
 type opts struct {
-	repos   []string
-	json    bool
-	verbose bool
-	fail    bool
+	repos    []string
+	json     bool
+	verbose  bool
+	fail     bool
+	policy   string
+	apply    bool
+	noBackup bool
 }
 
 func run(args []string) error {
@@ -60,11 +77,17 @@ func run(args []string) error {
 		usage()
 		return err
 	}
-	if len(pos) == 0 || pos[0] != "audit" {
+	if len(pos) == 0 {
 		usage()
-		return fmt.Errorf("missing audit subcommand")
+		return fmt.Errorf("missing subcommand")
 	}
-	targets := pos[1:]
+	sub, targets := pos[0], pos[1:]
+	switch sub {
+	case "audit", "sync":
+	default:
+		usage()
+		return fmt.Errorf("unknown subcommand %q", sub)
+	}
 	if len(targets) == 0 {
 		targets = []string{"."}
 	}
@@ -79,14 +102,59 @@ func run(args []string) error {
 	if len(plans) == 0 {
 		return fmt.Errorf("no plan files found")
 	}
+	if sub == "audit" {
+		return runAudit(plans, o)
+	}
+	return runSync(plans, o)
+}
+
+type loadedPlan struct {
+	doc    string
+	claims []claim.Claim
+	repos  []string
+	v      *verify.Verifier
+	abs    string
+}
+
+func loadPlan(path string, repoFlags []string) (loadedPlan, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return loadedPlan{}, err
+	}
+	doc := string(data)
+	claims := claim.Parse(doc)
+	repos := verify.DetectRepos(repoFlags, path, claim.RepoHints(doc))
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	return loadedPlan{
+		doc:    doc,
+		claims: claims,
+		repos:  repos,
+		v:      verify.New(repos, filepath.Dir(abs), doc),
+		abs:    abs,
+	}, nil
+}
+
+func runAudit(plans []string, o opts) error {
 	var reps []report.Report
 	anyBad := false
 	for _, p := range plans {
-		rep, bad, err := audit(p, o)
+		lp, err := loadPlan(p, o.repos)
 		if err != nil {
 			return err
 		}
-		reps = append(reps, rep)
+		results := lp.v.Verify(lp.claims)
+		ageNote := ageNote(lp.doc, lp.v)
+		bad := false
+		for _, r := range results {
+			switch r.Status {
+			case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
+				bad = true
+			}
+		}
+		reps = append(reps, report.Build(p, lp.repos, results, ageNote))
 		anyBad = anyBad || bad
 	}
 	if o.json {
@@ -102,29 +170,78 @@ func run(args []string) error {
 	return nil
 }
 
-func audit(path string, o opts) (report.Report, bool, error) {
-	data, err := os.ReadFile(path)
+func runSync(plans []string, o opts) error {
+	policy, err := syncer.ParsePolicy(o.policy)
 	if err != nil {
-		return report.Report{}, false, err
+		return err
 	}
-	doc := string(data)
-	claims := claim.Parse(doc)
-	repos := verify.DetectRepos(o.repos, path, claim.RepoHints(doc))
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = path
+	if o.apply && policy == syncer.PolicyReport {
+		return fmt.Errorf("--apply cannot be combined with --policy report")
 	}
-	v := verify.New(repos, filepath.Dir(abs), doc)
-	results := v.Verify(claims)
-	ageNote := ageNote(doc, v)
-	bad := false
-	for _, r := range results {
-		switch r.Status {
-		case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
-			bad = true
+	type syncOut struct {
+		File     string        `json:"file"`
+		Policy   string        `json:"policy"`
+		Edits    []syncer.Edit `json:"edits"`
+		Warnings []string      `json:"warnings,omitempty"`
+	}
+	var all []syncOut
+	for _, p := range plans {
+		lp, err := loadPlan(p, o.repos)
+		if err != nil {
+			return err
 		}
+		lines := strings.Split(lp.doc, "\n")
+		edits, warnings := syncer.Compute(lines, lp.v, lp.claims, lp.v.Verify(lp.claims), policy)
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s: %s\n", p, w)
+		}
+		all = append(all, syncOut{File: p, Policy: o.policy, Edits: edits, Warnings: warnings})
+		if len(edits) == 0 {
+			if !o.json {
+				fmt.Printf("== %s\n   nothing to sync (%s policy)\n\n", p, o.policy)
+			}
+			continue
+		}
+		if o.json {
+			continue
+		}
+		fmt.Print(syncer.RenderDiff(p, lines, edits))
+		fmt.Printf("   %d edit(s) (%s policy)\n", len(edits), o.policy)
+		if !o.apply {
+			fmt.Println("   preview only; --apply writes (with a .bak backup unless --no-backup)")
+			fmt.Println()
+			continue
+		}
+		out, err := syncer.Apply(lines, edits)
+		if err != nil {
+			return err
+		}
+		if !o.noBackup {
+			if err := os.WriteFile(p+".bak", []byte(lp.doc), 0o644); err != nil {
+				return err
+			}
+		}
+		newDoc := strings.Join(out, "\n")
+		if err := os.WriteFile(p, []byte(newDoc), 0o644); err != nil {
+			return err
+		}
+		nv := verify.New(lp.repos, filepath.Dir(lp.abs), newDoc)
+		bad := 0
+		for _, r := range nv.Verify(claim.Parse(newDoc)) {
+			switch r.Status {
+			case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
+				bad++
+			}
+		}
+		fmt.Printf("   applied %d edit(s); backup at %s.bak\n", len(edits), p)
+		fmt.Printf("   re-audit: %d finding(s) remain that sync does not fix automatically\n\n", bad)
 	}
-	return report.Build(path, repos, results, ageNote), bad, nil
+	if o.json {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(all)
+	}
+	return nil
 }
 
 var dateRe = regexp.MustCompile(`20\d{2}-\d{2}-\d{2}`)
@@ -143,11 +260,9 @@ func ageNote(doc string, v *verify.Verifier) string {
 		return "plan dated " + d
 	}
 	var parts []string
-	total := 0
 	for _, r := range v.Repos() {
 		if n, ok := since[r]; ok && n > 0 {
 			parts = append(parts, fmt.Sprintf("%s advanced %d commits", shortHome(r), n))
-			total += n
 		}
 	}
 	if len(parts) == 0 {
@@ -223,21 +338,20 @@ func depth(root, path string) int {
 	return strings.Count(rel, string(filepath.Separator)) + 1
 }
 
-func newFlagSet(o *opts) *flagSet {
-	return newFlagSetInner(o)
-}
-
 type flagSet struct {
 	inner *flag.FlagSet
 }
 
-func newFlagSetInner(o *opts) *flagSet {
+func newFlagSet(o *opts) *flagSet {
 	fs := &flagSet{inner: flag.NewFlagSet("plansync", flag.ContinueOnError)}
 	fs.inner.SetOutput(os.Stderr)
 	fs.inner.Var(&stringSlice{o: &o.repos}, "repo", "")
 	fs.inner.BoolVar(&o.json, "json", false, "")
 	fs.inner.BoolVar(&o.verbose, "verbose", false, "")
 	fs.inner.BoolVar(&o.fail, "fail", false, "")
+	fs.inner.StringVar(&o.policy, "policy", "markers", "")
+	fs.inner.BoolVar(&o.apply, "apply", false, "")
+	fs.inner.BoolVar(&o.noBackup, "no-backup", false, "")
 	return fs
 }
 
@@ -257,6 +371,7 @@ func (s *stringSlice) Set(v string) error {
 func splitFlags(args []string) (flags, pos []string, err error) {
 	valueFlags := map[string]bool{
 		"-repo": true, "--repo": true,
+		"-policy": true, "--policy": true,
 	}
 	i := 0
 	for i < len(args) {

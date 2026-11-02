@@ -13,15 +13,15 @@
 - [x] Unit tests for parser and verifier; corpus tuning against omnical,
       crabi, Determinism, uget, sentiments, opennic plans.
 
-## M2 — Sync
+## M2 — Sync (DONE)
 
-- [ ] `sync` subcommand with `--policy markers|heuristic|report`
+- [x] `sync` subcommand with `--policy markers|heuristic|report`
       (default `markers`): rewrite marker-owned regions (git-status blocks,
-      heads tables), re-anchor moved anchors, apply report-style patch output
-      for everything else.
-- [ ] Marker spec implementation (`<!-- plansync:begin … -->` regions).
-- [ ] Heuristic mode: refresh unmarked-but-unambiguous blocks (exact
-      porcelain shape, same entry set) with backup + diff before write.
+      heads tables), re-anchor moved anchors, preview diff by default,
+      `--apply` writes with `.bak` backup and a post-apply re-audit.
+- [x] Marker spec implementation (`<!-- plansync:begin … -->` regions).
+- [x] Heuristic mode: refresh the most recent unmarked git-status block per
+      repo and stale head-table commits, with backup + diff.
 
 ## M3 — Brief
 

@@ -34,19 +34,17 @@ it; the working toolchain is `/usr/lib/go`.)
 ## Usage
 
 ```
-plansync audit [plans...] [flags]
-
-Arguments are plan files or directories (default: .). Directories are walked
-for markdown files whose names look like plans (plan, roadmap, todo,
-continuation, next_agent). Repositories are discovered from the plan's own
-**Repo:** / **Working tree:** headers, handoff tables, and the plan's git
-worktree; --repo adds more.
+plansync audit [plans...] [flags]     report claims that have gone stale
+plansync sync  [plans...] [flags]     refresh tool-owned plan regions
 
 Flags:
-  --repo path   candidate repository (repeatable)
-  --json        machine-readable output
-  --verbose     also print ok claims individually
-  --fail        exit non-zero when any stale/moved/missing claim is found
+  --repo path       candidate repository (repeatable)
+  --json            machine-readable output
+  --verbose         audit: also print ok claims individually
+  --fail            audit: exit non-zero on stale/moved/missing findings
+  --policy p        sync: markers (default) | heuristic | report
+  --apply           sync: write changes (default: preview diff only)
+  --no-backup       sync: skip the .bak backup when applying
 ```
 
 ## What gets checked
@@ -67,6 +65,42 @@ relocated, suggestion given), `missing` (claimed file gone), `unknown`
 
 Freshness = ok / (ok + stale + moved + missing).
 
+## Syncing plans back to current state
+
+`sync` computes the edits a policy allows, previews a unified diff, and —
+with `--apply` — writes them (after saving `<plan>.bak`), then re-audits and
+reports the findings it could not fix:
+
+```console
+$ plansync sync PLAN_NEXT_AGENT_403_FIX.md --repo ~/router-dav/rustical --policy heuristic --apply
+@@ L22-L27 @@ refresh most recent working-tree block to current state (heuristic)
+-  M crates/caldav/src/calendar_object/methods.rs   (+59/-13 net: …)
++ # clean (HEAD e30c90d9)
+@@ L44-L44 @@ re-anchor crates/ical/src/calendar_object.rs
+- - Wired into `CalendarObject::import` (`crates/ical/src/calendar_object.rs:79`)
++ - Wired into `CalendarObject::import` (`crates/ical/src/calendar_object.rs:71`)
+   applied 4 edit(s); backup at PLAN_NEXT_AGENT_403_FIX.md.bak
+   re-audit: 0 finding(s) remain that sync does not fix automatically
+```
+
+| Policy | Rewrites |
+|---|---|
+| `markers` (default) | `plansync` marker regions (below) + symbol-verified re-anchoring of moved `path:line` refs |
+| `heuristic` | markers, plus the most recent *unmarked* git-status block per repo (older blocks are doc-log history) and stale head-table commits |
+| `report` | computes the heuristic edit set, never writes |
+
+Marker regions are the tool's own and are rewritten wholesale:
+
+```html
+<!-- plansync:begin git-status repo=~/router-dav/rustical -->
+<!-- plansync:begin heads -->
+```
+
+`git-status` bodies are fenced porcelain dumps (or `# clean (HEAD <hash>)`);
+`heads` bodies are backticked repo/head tables. Re-anchoring never guesses:
+it only re-points a `path:line` ref when the plan line names a symbol and
+that symbol still exists in the file.
+
 ## Repository discovery
 
 In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
@@ -83,8 +117,9 @@ plansync audit ~/Documents/ByteWheel/omnical --repo ~/router-dav/rustical --repo
 cmd/plansync       CLI
 internal/claim     plan → claims parser (see docs/FORMAT-SPEC.md)
 internal/verify    git/file verification, suffix index, re-anchoring
-internal/report    human + JSON rendering
-docs/ROADMAP.md    milestones (M2 sync, M3 brief, M4 log, M5 init, M6 plugin)
+internal/syncer    edit computation, marker regions, diff, apply
+internal/report    audit rendering (human + JSON)
+docs/ROADMAP.md    milestones (M3 brief, M4 log, M5 init, M6 plugin)
 AGENTS.md          instructions for AI agents working in this repo — and the
                    snippet to paste into any repo whose plans should be audited
 ```

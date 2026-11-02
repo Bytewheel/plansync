@@ -81,6 +81,7 @@ type parser struct {
 	pending       []GitEntry
 	lastAnchor    string
 	lastAnchorLin int
+	lastSyms      []string
 }
 
 func Parse(doc string) []Claim {
@@ -170,12 +171,13 @@ func (p *parser) parseLine(line string, n int) {
 		if el := elidedRe.FindStringSubmatch(s); el != nil {
 			if p.lastAnchor != "" && n-p.lastAnchorLin >= 0 && n-p.lastAnchorLin <= 2 {
 				start, end := nums(el[1], el[2])
-				p.claims = append(p.claims, Claim{Kind: KindAnchor, Line: n, Text: line, Path: p.lastAnchor, Start: start, End: end})
+				p.claims = append(p.claims, Claim{Kind: KindAnchor, Line: n, Text: line, Path: p.lastAnchor, Start: start, End: end, Symbols: p.lastSyms})
 			}
 			continue
 		}
 		if a := anchorRe.FindStringSubmatch(s); a != nil && pathish(a[1]) {
 			start, end := nums(a[2], a[3])
+			syms := symbols(line, a[1])
 			p.claims = append(p.claims, Claim{
 				Kind:    KindAnchor,
 				Line:    n,
@@ -183,9 +185,10 @@ func (p *parser) parseLine(line string, n int) {
 				Path:    a[1],
 				Start:   start,
 				End:     end,
-				Symbols: symbols(line, a[1]),
+				Symbols: syms,
 			})
 			p.lastAnchor, p.lastAnchorLin = a[1], n
+			p.lastSyms = syms
 			continue
 		}
 		if commitRe.MatchString(s) {
