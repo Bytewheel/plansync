@@ -19,6 +19,17 @@ full plan (often 200–6,000 lines):
 ~/Documents/ByteWheel/plansync/bin/plansync audit <plan.md> --repo <repo> [--repo <repo2>]
 ```
 
+For the shortest session-start signal, `brief` packages the audit findings,
+the plan's remaining-work sections, and its open checkboxes in one
+budget-capped digest:
+
+```sh
+~/Documents/ByteWheel/plansync/bin/plansync brief <plan.md> --repo <repo> [--repo <repo2>] [--max-lines 40]
+```
+
+Use `brief` when you only need "what is stale + what is left"; use `audit`
+when you need the full claim-by-claim report.
+
 The report tells you, before you read a word of prose:
 
 - whether the "uncommitted work" the plan describes is still uncommitted — or

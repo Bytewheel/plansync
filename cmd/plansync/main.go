@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"bytewheel/plansync/internal/brief"
 	"bytewheel/plansync/internal/claim"
 	"bytewheel/plansync/internal/report"
 	"bytewheel/plansync/internal/syncer"
@@ -31,6 +32,8 @@ func usage() {
 Usage:
   plansync audit [plans...] [flags]     report claims that have gone stale
   plansync sync  [plans...] [flags]     refresh tool-owned plan regions
+  plansync brief [plans...] [flags]     session-start digest: findings +
+                                        remaining work + open checkboxes
 
 Arguments are plan files or directories (default: .). Directories are walked
 for markdown files whose names look like plans (plan, roadmap, todo,
@@ -46,6 +49,7 @@ Flags:
   --policy p        sync: markers (default) | heuristic | report
   --apply           sync: write changes (default: preview diff only)
   --no-backup       sync: skip the .bak backup when applying
+  --max-lines n     brief: cap the digest at n lines (default 40)
 
 Sync policies:
   markers     rewrite plansync marker regions and re-anchor moved
@@ -64,6 +68,7 @@ type opts struct {
 	policy   string
 	apply    bool
 	noBackup bool
+	maxLines int
 }
 
 func run(args []string) error {
@@ -83,7 +88,7 @@ func run(args []string) error {
 	}
 	sub, targets := pos[0], pos[1:]
 	switch sub {
-	case "audit", "sync":
+	case "audit", "sync", "brief":
 	default:
 		usage()
 		return fmt.Errorf("unknown subcommand %q", sub)
@@ -104,6 +109,9 @@ func run(args []string) error {
 	}
 	if sub == "audit" {
 		return runAudit(plans, o)
+	}
+	if sub == "brief" {
+		return runBrief(plans, o)
 	}
 	return runSync(plans, o)
 }
@@ -167,6 +175,23 @@ func runAudit(plans []string, o opts) error {
 	if o.fail && anyBad {
 		os.Exit(1)
 	}
+	return nil
+}
+
+func runBrief(plans []string, o opts) error {
+	var digests []brief.Brief
+	for _, p := range plans {
+		lp, err := loadPlan(p, o.repos)
+		if err != nil {
+			return err
+		}
+		results := lp.v.Verify(lp.claims)
+		digests = append(digests, brief.Build(p, lp.repos, lp.doc, lp.claims, results, ageNote(lp.doc, lp.v)))
+	}
+	if o.json {
+		return brief.JSON(digests, os.Stdout)
+	}
+	brief.Render(os.Stdout, digests, o.maxLines)
 	return nil
 }
 
@@ -352,6 +377,7 @@ func newFlagSet(o *opts) *flagSet {
 	fs.inner.StringVar(&o.policy, "policy", "markers", "")
 	fs.inner.BoolVar(&o.apply, "apply", false, "")
 	fs.inner.BoolVar(&o.noBackup, "no-backup", false, "")
+	fs.inner.IntVar(&o.maxLines, "max-lines", 40, "")
 	return fs
 }
 
@@ -372,6 +398,7 @@ func splitFlags(args []string) (flags, pos []string, err error) {
 	valueFlags := map[string]bool{
 		"-repo": true, "--repo": true,
 		"-policy": true, "--policy": true,
+		"-max-lines": true, "--max-lines": true,
 	}
 	i := 0
 	for i < len(args) {

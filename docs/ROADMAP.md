@@ -23,11 +23,11 @@
 - [x] Heuristic mode: refresh the most recent unmarked git-status block per
       repo and stale head-table commits, with backup + diff.
 
-## M3 — Brief
+## M3 — Brief (DONE)
 
-- [ ] `brief` subcommand: session-start digest = remaining-work sections
+- [x] `brief` subcommand: session-start digest = remaining-work sections
       extracted from the plan + audit results + open checkboxes, capped at N
-      lines. The token-saving headline feature.
+      lines (`--max-lines`, default 40). The token-saving headline feature.
 
 ## M4 — Log
 

@@ -36,6 +36,8 @@ it; the working toolchain is `/usr/lib/go`.)
 ```
 plansync audit [plans...] [flags]     report claims that have gone stale
 plansync sync  [plans...] [flags]     refresh tool-owned plan regions
+plansync brief [plans...] [flags]     session-start digest: findings +
+                                       remaining work + open checkboxes
 
 Flags:
   --repo path       candidate repository (repeatable)
@@ -45,6 +47,7 @@ Flags:
   --policy p        sync: markers (default) | heuristic | report
   --apply           sync: write changes (default: preview diff only)
   --no-backup       sync: skip the .bak backup when applying
+  --max-lines n     brief: cap the digest at n lines (default 40)
 ```
 
 ## What gets checked
@@ -101,6 +104,37 @@ Marker regions are the tool's own and are rewritten wholesale:
 it only re-points a `path:line` ref when the plan line names a symbol and
 that symbol still exists in the file.
 
+## Session-start brief
+
+`brief` is the one-command digest for session start: audit findings first
+(established facts), then the plan's remaining-work sections excerpted
+verbatim, then any open checkboxes outside those sections — under a line
+budget:
+
+```console
+$ plansync brief PLAN_NEXT_AGENT_403_FIX.md --repo ~/router-dav/rustical
+== PLAN_NEXT_AGENT_403_FIX.md (freshness 86%; plan dated 2026-09-18; ~/router-dav/rustical advanced 99 commits)
+   stale   L22   git-tree  working tree is CLEAN (HEAD e30c90d9) but plan claims 6 dirty entries; ...
+   moved   L44   anchor    crates/ical/src/calendar_object.rs not at :79 ... -> crates/ical/src/calendar_object.rs:71
+   work    L94   section  2. Remaining work, in order
+      1. **Sanity re-run** (fast, confirms nothing drifted):
+         ```bash
+         cd ~/router-dav/rustical
+         ...
+   ...    +9 line(s) elided; raise --max-lines
+
+briefed 1 plan(s) in 42 line(s) (cap 40)
+```
+
+Remaining-work sections are headings matching the remaining-work vocabulary
+(remaining, next steps, next agent, open items/questions, todo, outstanding,
+unfinished, resume order, pending, …); a section extends to the next heading
+of the same or higher level. Open checkboxes already inside an excerpt are
+not repeated. `--max-lines` (default 40) is a total budget split across
+plans; findings outrank excerpts, which outrank loose checkboxes; everything
+cut is counted in an elision line. Plans with no findings, sections, or open
+checkboxes say so in one line — that is itself the answer.
+
 ## Repository discovery
 
 In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
@@ -118,10 +152,11 @@ cmd/plansync       CLI
 internal/claim     plan → claims parser (see docs/FORMAT-SPEC.md)
 internal/verify    git/file verification, suffix index, re-anchoring
 internal/syncer    edit computation, marker regions, diff, apply
+internal/brief     session-start digest (findings + remaining work + checkboxes)
 internal/report    audit rendering (human + JSON)
-docs/ROADMAP.md    milestones (M3 brief, M4 log, M5 init, M6 plugin)
+docs/ROADMAP.md    milestones (M4 log, M5 init, M6 plugin)
 AGENTS.md          instructions for AI agents working in this repo — and the
-                   snippet to paste into any repo whose plans should be audited
+                    snippet to paste into any repo whose plans should be audited
 ```
 
 See `docs/FORMAT-SPEC.md` for the exact grammar, and `AGENTS.md` for the

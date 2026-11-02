@@ -169,7 +169,6 @@ receives an insertion edit (Start = End+1).
 
 ## 12. Known limitations
 
-- No rewrite capability yet (M2 `sync`); audit is strictly read-only.
 - Numeric gate claims are unverified without gate config.
 - Anchor symbol extraction only reads the anchor's own line; symbols named on
   neighbouring lines are missed (deliberate: keeps false-`ok` risk low).
@@ -181,3 +180,61 @@ receives an insertion edit (Start = End+1).
   annotated history safe.
 - Sync cannot fix: anchors whose symbols vanished, missing paths, numeric
   gate claims, checkboxes. It reports them in the post-apply re-audit.
+
+## 13. Brief digest (M3)
+
+`plansync brief` renders a session-start digest per plan: header, then the
+audit's `stale`/`moved`/`missing` findings (same `status Lline kind message`
+shape as audit, messages truncated to 120 chars), then remaining-work
+sections, then open checkboxes.
+
+### 13.1 Remaining-work sections
+
+A section is an ATX heading (`^ {0,3}#{1,6}\s+text`, not inside a fenced
+block) whose text matches, case-insensitively and word-bounded:
+
+```
+remaining | outstanding | unfinished | todos? | to-do
+open (items?|questions?|work) | next (steps?|tasks?|agent)
+resume order | left to do | not yet done | pending
+```
+
+The section body extends to the next heading of the same or higher level
+(deeper headings are content). Fenced blocks inside the body are kept as
+content; fenced pseudo-headings do not count as headings. A matching heading
+nested inside an already-extracted section is skipped (the outer excerpt
+already covers it). Trailing blank lines are trimmed; the section records
+its heading line and last body line for checkbox de-duplication.
+
+### 13.2 Checkboxes
+
+Open `- [ ]` items are counted; those inside an extracted section are not
+repeated (the excerpt shows them). Those outside are listed with their
+`- [ ]` prefix stripped, one digest line each.
+
+### 13.3 Line budget
+
+`--max-lines N` (default 40) is a total budget across plans; each plan gets
+`remaining budget / plans left` (floor 3). Within a plan the order is
+header → findings → unknown count → section excerpts → loose checkboxes;
+over-budget lines are cut from the end and counted in one elision line
+(`+K line(s) elided; raise --max-lines`). Each section excerpt is
+additionally capped at 20 body lines (blank runs collapsed) with a
+`(+K more line(s) in plan)` note. The footer reports the true line count,
+which may exceed the cap by the elision lines, blank separators, and footer.
+
+### 13.4 JSON
+
+`--json` emits the unexcerpted digests: `[{file, repos, freshness, age_note,
+findings, unknowns, sections: [{heading, line, end, body}], open_checkboxes,
+open_boxes, done_boxes}]` — bodies are complete; apply your own caps.
+
+### 13.5 Known limitations (brief)
+
+- Only ATX headings (`## text`); setext (`text\n====`) headings are not
+  recognised as section boundaries.
+- The remaining-work vocabulary is intentionally conservative; roadmap-style
+  plans whose work lives in unchecked boxes under non-matching headings fall
+  back to the loose-checkbox listing.
+- With many plans under a small cap, later plans may render header + elision
+  only; raise `--max-lines` or brief the plans individually.
