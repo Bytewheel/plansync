@@ -7,6 +7,7 @@ package doclog
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -99,6 +100,8 @@ func Build(o Options, v *verify.Verifier) []string {
 	return b
 }
 
+var emptyLabelRe = regexp.MustCompile(`^\s*\*\*[^*]+:\*\*\s*$`)
+
 func renderTemplate(o Options, v *verify.Verifier) []string {
 	t := strings.ReplaceAll(o.Template, "\r\n", "\n")
 	git := strings.Join(GitState(v), "\n")
@@ -113,7 +116,20 @@ func renderTemplate(o Options, v *verify.Verifier) []string {
 	} {
 		t = strings.ReplaceAll(t, r.ph, r.val)
 	}
-	return strings.Split(strings.TrimRight(t, "\n"), "\n")
+	var out []string
+	for _, l := range strings.Split(strings.TrimRight(t, "\n"), "\n") {
+		// A house-style label whose value substituted to empty is dropped,
+		// matching the built-in template's omit-empty behaviour; a blank
+		// line left stranded by the drop is collapsed.
+		if emptyLabelRe.MatchString(l) {
+			continue
+		}
+		if strings.TrimSpace(l) == "" && len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 // FindTemplate returns the raw template and its source path. An explicit

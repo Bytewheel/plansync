@@ -290,7 +290,10 @@ Substitutions: `{{date}}` (defaults to today, `--date` to override),
 `{{subject}}`, `{{diagnosis}}`, `{{fixes}}`, `{{tests}}`, `{{deploy}}`, and
 `{{git}}` — the multi-line per-repo git state of §14.1, which should sit on
 its own line since it brings its own fences. Unknown placeholders pass
-through untouched; missing fields substitute empty strings.
+through untouched; missing fields substitute empty strings, and a
+house-style label line whose value came out empty (`**Deploy transcript:**`)
+is dropped (with any stranded blank line), matching the built-in shape's
+omit-empty behaviour.
 
 ### 14.3 Interaction with brief
 

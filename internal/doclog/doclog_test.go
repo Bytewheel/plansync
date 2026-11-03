@@ -244,6 +244,25 @@ func TestGeneratedEntryIsAuditParseable(t *testing.T) {
 	}
 }
 
+func TestBuildTemplateOmitsEmptyLabels(t *testing.T) {
+	v := verify.New(nil, "", "")
+	tmpl := "## {{date}}\n\n**Diagnosis:** {{diagnosis}}\n\n**Fixes:** {{fixes}}\n\nkept: plain line\n"
+	entry := Build(Options{Date: "2026-11-02", Diagnosis: "d", Template: tmpl}, v)
+	text := strings.Join(entry, "\n")
+	if !strings.Contains(text, "**Diagnosis:** d") {
+		t.Fatalf("filled label must render:\n%s", text)
+	}
+	if strings.Contains(text, "Fixes") {
+		t.Fatalf("empty label must be dropped:\n%s", text)
+	}
+	if !strings.Contains(text, "kept: plain line") {
+		t.Fatalf("other lines must survive:\n%s", text)
+	}
+	if strings.HasSuffix(text, "\n\n") || strings.Contains(text, "\n\n\n") {
+		t.Fatalf("dropped labels must not leave blank runs:\n%q", text)
+	}
+}
+
 func TestFindTemplate(t *testing.T) {
 	gitAvailable(t)
 	repo := t.TempDir()
