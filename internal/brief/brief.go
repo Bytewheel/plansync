@@ -90,6 +90,7 @@ var (
 	fenceRe       = regexp.MustCompile("^(\\s{0,3})(```|~~~)")
 	remainingRe   = regexp.MustCompile(`(?i)\b(?:remaining|outstanding|unfinished|todos?|to-do|open\s+(?:items?|questions?|work)|next\s+(?:steps?|tasks?|agent)|resume\s+order|left\s+to\s+do|not\s+yet\s+done|pending)\b`)
 	checkboxPreRe = regexp.MustCompile(`^\s*[-*]\s+\[[ xX]\]\s*`)
+	dateHeadingRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}\b`)
 )
 
 func checkboxText(s string) string {
@@ -98,8 +99,10 @@ func checkboxText(s string) string {
 
 // ExtractSections returns the plan's remaining-work sections: headings whose
 // text matches the remaining-work vocabulary, each extending to the next
-// heading of the same or higher level. Nested matches inside an
-// already-extracted section are skipped.
+// heading of the same or higher level. Date-prefixed headings (doc-log
+// entries, as written by `plansync log`) terminate a section and are never
+// extracted themselves — they are history, not remaining work. Nested
+// matches inside an already-extracted section are skipped.
 func ExtractSections(doc string) []Section {
 	lines := strings.Split(doc, "\n")
 	type heading struct {
@@ -124,6 +127,9 @@ func ExtractSections(doc string) []Section {
 	}
 	var secs []Section
 	for i, h := range headings {
+		if dateHeadingRe.MatchString(h.text) {
+			continue
+		}
 		if !remainingRe.MatchString(h.text) {
 			continue
 		}
@@ -139,7 +145,7 @@ func ExtractSections(doc string) []Section {
 		}
 		end := len(lines)
 		for _, h2 := range headings[i+1:] {
-			if h2.level <= h.level {
+			if h2.level <= h.level || dateHeadingRe.MatchString(h2.text) {
 				end = h2.line - 1
 				break
 			}

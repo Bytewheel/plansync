@@ -38,6 +38,8 @@ plansync audit [plans...] [flags]     report claims that have gone stale
 plansync sync  [plans...] [flags]     refresh tool-owned plan regions
 plansync brief [plans...] [flags]     session-start digest: findings +
                                        remaining work + open checkboxes
+plansync log   [plan] [flags]         append a dated doc-log entry built
+                                       from flags + current git state
 
 Flags:
   --repo path       candidate repository (repeatable)
@@ -45,9 +47,17 @@ Flags:
   --verbose         audit: also print ok claims individually
   --fail            audit: exit non-zero on stale/moved/missing findings
   --policy p        sync: markers (default) | heuristic | report
-  --apply           sync: write changes (default: preview diff only)
-  --no-backup       sync: skip the .bak backup when applying
+  --apply           sync/log: write changes (default: preview diff only)
+  --no-backup       sync/log: skip the .bak backup when applying
   --max-lines n     brief: cap the digest at n lines (default 40)
+  --date d          log: entry date, YYYY-MM-DD (default today)
+  --subject s       log: entry subject for the heading
+  --diagnosis s     log: diagnosis text
+  --fixes s         log: fixes text
+  --tests s         log: test-count text
+  --deploy s        log: deploy transcript text
+  --template path   log: template file (default: .plansync/log-template.md
+                    from a candidate repo or the plan dir; built-in otherwise)
 ```
 
 ## What gets checked
@@ -58,7 +68,7 @@ Flags:
 | commit hashes | backticked 7–40 hex; "Head" table columns | `git cat-file`, `git rev-parse HEAD` |
 | branches | backticked names on lines mentioning "branch" | `git rev-parse refs/heads/…` |
 | `file.rs:NNN` anchors | backticked (and elided `:NNN` continuation) refs; ranges `:A-B` | line bounds, then symbol context from the same plan line; moved anchors get a re-anchor suggestion |
-| file paths | backticked paths (incl. `~/`, `/abs`, `dir/file.rs::symbol`) | direct join, then suffix match across an indexed repo (plans routinely strip leading dirs like `crates/frontend/public/templates/`) |
+| file paths | backticked paths (incl. `~/`, `/abs`, dir/file.rs::symbol) | direct join, then suffix match across an indexed repo (plans routinely strip leading dirs like `crates/frontend/public/templates/`) |
 | checkboxes | `- [ ]` / `- [x]` | counted, open ones listed by line |
 | test/gate counts | `N tests`, `OK=n FAIL=n`, `n/m` | reported as unverified (M2: gate config) |
 
@@ -135,6 +145,50 @@ plans; findings outrank excerpts, which outrank loose checkboxes; everything
 cut is counted in an elision line. Plans with no findings, sections, or open
 checkboxes say so in one line — that is itself the answer.
 
+## Appending doc-log entries
+
+`log` records a session in the plan: a dated heading, live git state per
+repo, and the four house sections (diagnosis → fixes → test counts → deploy
+transcript). It previews by default and writes with `--apply` (`.bak`
+backup, then a post-apply re-audit):
+
+```console
+$ plansync log PLAN.md --repo /opt/appliance \
+    --subject "mirror 403 fix" \
+    --diagnosis "floating UNTIL rejected by caldata" \
+    --fixes "normalize_rrule_until on import" \
+    --tests "appliance_ical 16, appliance_scheduling 61, 0 failures" \
+    --deploy "deploy.sh run, services restarted" --apply
+== PLAN.md
+### 2026-11-02 — mirror 403 fix
+
+**Repo:** `/opt/appliance`, branch `main`, HEAD `cafe1234`; working tree:
+
+```
+ M appliance/src/mirror.rs
+```
+
+**Diagnosis:** floating UNTIL rejected by caldata
+
+**Fixes:** normalize_rrule_until on import
+
+**Test counts:** appliance_ical 16, appliance_scheduling 61, 0 failures
+
+**Deploy transcript:** deploy.sh run, services restarted
+   appended 17 line(s) to PLAN.md; backup at PLAN.md.bak
+   re-audit: 0 finding(s) (includes pre-existing plan history)
+```
+
+The generated entry is audit grammar on purpose — the `**Repo:**` header is
+a repo hint, the branch/HEAD mentions and the fenced porcelain block are
+claims — so the next `audit`/`brief` re-verifies what the entry says. A
+custom template (`.plansync/log-template.md` in a candidate repo, next to
+the plan, or `--template path`) substitutes `{{date}}`, `{{subject}}`,
+`{{diagnosis}}`, `{{fixes}}`, `{{tests}}`, `{{deploy}}`, and `{{git}}`
+(the multi-line per-repo git state; keep it on its own line). Dated
+headings also terminate remaining-work excerpts in `brief`, keeping log
+history out of the work digest.
+
 ## Repository discovery
 
 In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
@@ -153,8 +207,9 @@ internal/claim     plan → claims parser (see docs/FORMAT-SPEC.md)
 internal/verify    git/file verification, suffix index, re-anchoring
 internal/syncer    edit computation, marker regions, diff, apply
 internal/brief     session-start digest (findings + remaining work + checkboxes)
+internal/doclog    dated doc-log entry assembly (git state + template)
 internal/report    audit rendering (human + JSON)
-docs/ROADMAP.md    milestones (M4 log, M5 init, M6 plugin)
+docs/ROADMAP.md    milestones (M5 init, M6 plugin)
 AGENTS.md          instructions for AI agents working in this repo — and the
                     snippet to paste into any repo whose plans should be audited
 ```

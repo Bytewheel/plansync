@@ -44,6 +44,7 @@ type Verifier struct {
 	docLines    []string
 	statusCache map[string]map[string]string
 	headCache   map[string]string
+	branchCache map[string]string
 	logCache    map[string]string
 	indexCache  map[string]map[string]string
 }
@@ -55,6 +56,7 @@ func New(repos []string, planDir string, doc string) *Verifier {
 		docLines:    strings.Split(doc, "\n"),
 		statusCache: map[string]map[string]string{},
 		headCache:   map[string]string{},
+		branchCache: map[string]string{},
 		logCache:    map[string]string{},
 	}
 }
@@ -592,7 +594,9 @@ func validXY(xy string) bool {
 		return false
 	}
 	x, y := xy[0], xy[1]
-	if strings.IndexByte("MADRCU?!", x) < 0 {
+	// X may be ' ' (unstaged worktree change: " M", " D"); Y may be ' '
+	// (staged-only change: "M ", "A ").
+	if strings.IndexByte(" MADRCU?!", x) < 0 {
 		return false
 	}
 	return y == ' ' || strings.IndexByte("MDAUC?", y) >= 0
@@ -644,6 +648,21 @@ func (v *Verifier) CommitsSince(date string) map[string]int {
 
 // HeadShort returns the short HEAD hash of root (cached per verifier).
 func (v *Verifier) HeadShort(root string) string { return v.headShort(root) }
+
+// Branch returns the current branch name of root (cached per verifier);
+// "" when git fails (detached HEAD prints "HEAD", which is passed through).
+func (v *Verifier) Branch(root string) string {
+	if s, ok := v.branchCache[root]; ok {
+		return s
+	}
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	s := strings.TrimSpace(string(out))
+	if err != nil {
+		s = ""
+	}
+	v.branchCache[root] = s
+	return s
+}
 
 // PorcelainLines returns the raw `git status --porcelain=v1` lines of root.
 func (v *Verifier) PorcelainLines(root string) []string {

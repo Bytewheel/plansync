@@ -76,12 +76,13 @@ A backticked span is pathish when it has no whitespace, no `:`, none of
 - relative — must contain a `.` (extension); dotless `a/b` pairs are remote
   refs / package categories, not files.
 
-`path/file.rs::symbol` module paths yield a path claim for the file part.
+`internal/claim/claim.go::Parse` module paths yield a path claim for the
+file part.
 
 ### 4.2 Suffix index
 
-Plans routinely strip leading directories (`pages/x.html` for
-`crates/frontend/public/templates/pages/x.html`). When direct joins fail, each
+Plans routinely strip leading directories (`brief/brief.go` for
+`internal/brief/brief.go`). When direct joins fail, each
 candidate repo's file tree (`.git`, `target`, `node_modules`, dot-dirs
 skipped) is indexed once and the shortest relative path ending in `/claim` is
 used; results are reported as "exists at … (suffix match)".
@@ -180,6 +181,12 @@ receives an insertion edit (Start = End+1).
   annotated history safe.
 - Sync cannot fix: anchors whose symbols vanished, missing paths, numeric
   gate claims, checkboxes. It reports them in the post-apply re-audit.
+- Documentation example noise: grammar samples in this spec and README
+  (deliberately generic paths like dir/file.rs) and the `-` before-lines
+  of pasted diff/audit transcripts reference generic or since-superseded
+  state; audit reports them missing/moved. Treat them as illustrative, not
+  claims — or keep samples unresolvable (fictional repos/paths) so they
+  surface as `unknown` (info) instead.
 
 ## 13. Brief digest (M3)
 
@@ -200,11 +207,14 @@ resume order | left to do | not yet done | pending
 ```
 
 The section body extends to the next heading of the same or higher level
-(deeper headings are content). Fenced blocks inside the body are kept as
-content; fenced pseudo-headings do not count as headings. A matching heading
-nested inside an already-extracted section is skipped (the outer excerpt
-already covers it). Trailing blank lines are trimmed; the section records
-its heading line and last body line for checkbox de-duplication.
+(deeper headings are content). A heading whose text starts with a date
+(`YYYY-MM-DD`, the shape `plansync log` writes) terminates the section and
+is never a section candidate itself — dated headings are doc-log history.
+Fenced blocks inside the body are kept as content; fenced pseudo-headings
+do not count as headings. A matching heading nested inside an
+already-extracted section is skipped (the outer excerpt already covers it).
+Trailing blank lines are trimmed; the section records its heading line and
+last body line for checkbox de-duplication.
 
 ### 13.2 Checkboxes
 
@@ -238,3 +248,51 @@ open_boxes, done_boxes}]` — bodies are complete; apply your own caps.
   back to the loose-checkbox listing.
 - With many plans under a small cap, later plans may render header + elision
   only; raise `--max-lines` or brief the plans individually.
+
+## 14. Log entries (M4)
+
+`plansync log PLAN` appends one entry at the end of the plan, separated by a
+blank line, with exactly one trailing newline. Preview by default; `--apply`
+writes after saving `<plan>.bak` (unless `--no-backup`) and re-audits.
+
+### 14.1 Default entry shape
+
+```
+### YYYY-MM-DD[ — subject]
+
+**Repo:** `path`, branch `name`, HEAD `short-hash`; working tree:
+
+```
+ M src/a.rs
+?? src/b.rs
+```
+
+**Diagnosis:** …
+**Fixes:** …
+**Test counts:** …
+**Deploy transcript:** …
+```
+
+One Repo/git block per candidate repo (clean trees print
+`… HEAD `hash`; working tree clean.` with no fence). Empty text fields are
+omitted; the git state is always included. Every line is audit grammar: the
+`**Repo:**` header is a repo hint (§8), the backticked branch name and HEAD
+hash are branch/commit claims, and the fenced block is a git-tree claim — a
+freshly written entry audits clean by construction.
+
+### 14.2 Templates
+
+A custom template replaces the built-in shape. Discovery order: `--template
+path` (read errors are fatal), then `.plansync/log-template.md` in each
+candidate repo root, then next to the plan; none found = built-in default.
+Substitutions: `{{date}}` (defaults to today, `--date` to override),
+`{{subject}}`, `{{diagnosis}}`, `{{fixes}}`, `{{tests}}`, `{{deploy}}`, and
+`{{git}}` — the multi-line per-repo git state of §14.1, which should sit on
+its own line since it brings its own fences. Unknown placeholders pass
+through untouched; missing fields substitute empty strings.
+
+### 14.3 Interaction with brief
+
+Dated headings (`### YYYY-MM-DD …`) terminate remaining-work excerpts
+(§13.1) and are never extracted as sections, so appended log history stays
+out of the session-start digest.

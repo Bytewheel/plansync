@@ -29,11 +29,14 @@
       extracted from the plan + audit results + open checkboxes, capped at N
       lines (`--max-lines`, default 40). The token-saving headline feature.
 
-## M4 — Log
+## M4 — Log (DONE)
 
-- [ ] `log` subcommand: append a house-style dated doc-log entry
+- [x] `log` subcommand: append a house-style dated doc-log entry
       (diagnosis → fixes → test counts → deploy transcript) assembled from
-      current git state and a per-repo template.
+      current git state and a per-repo template
+      (`.plansync/log-template.md`; built-in default otherwise). Preview by
+      default; `--apply` writes with `.bak` backup and a post-apply
+      re-audit; generated entries are audit-parseable and audit clean.
 
 ## M5 — Init
 

@@ -68,9 +68,30 @@ claims individually.
 1. Run the audit again on the plan(s) you touched.
 2. Fix every `stale`/`moved`/`missing` finding, either by hand or with
    `plansync sync` (below).
-3. Re-run the audit until the plan is clean, then write the handoff note.
+3. Record the session with `plansync log` (below) — it appends a dated
+   doc-log entry with live git state, so the next agent's audit starts from
+   recorded facts instead of re-derived guesses.
+4. Re-run the audit until the plan is clean, then write the handoff note.
    A clean audit attached to the handoff is worth more than prose promising
    the plan is current.
+
+### plansync log
+
+```sh
+~/Documents/ByteWheel/plansync/bin/plansync log <plan.md> --repo <repo> \
+  [--subject s] [--diagnosis s] [--fixes s] [--tests s] [--deploy s] \
+  [--date YYYY-MM-DD] [--template path] [--apply]
+```
+
+`log` appends a house-style dated entry (diagnosis → fixes → test counts →
+deploy transcript) with the current git state of every candidate repo; empty
+fields are omitted. It previews by default; `--apply` writes (`.bak` backup
+unless `--no-backup`) and re-audits. The entry is written in audit grammar
+(`**Repo:**` header, branch/HEAD mentions, fenced porcelain), so it keeps
+verifying on every future audit. Template: `.plansync/log-template.md` from
+a candidate repo or next to the plan, `--template` to override, built-in
+default otherwise; placeholders `{{date}} {{subject}} {{diagnosis}} {{fixes}}
+{{tests}} {{deploy}} {{git}}`.
 
 ### plansync sync
 
@@ -131,7 +152,8 @@ claims in the shapes the grammar reads (full spec in `docs/FORMAT-SPEC.md`):
   ```
 
   The second row verifies and re-anchors; the first can only bounds-check.
-- Name test files with full paths (`tests/support_bundle.rs`), not bare names.
+- Name test files with full paths (`internal/claim/claim_test.go`), not
+  bare names.
 - Keep `- [ ]` / `- [x]` checkboxes on their own lines for counting.
 
 ### Marker blocks
@@ -162,7 +184,7 @@ generated body brings its own where needed.
 ## Embedding in other repos
 
 To make agents working inside a plan-heavy repo run this automatically, add to
-that repo's `AGENTS.md` (or `.opencode/instructions`):
+that repo's `AGENTS.md` (or .opencode/instructions):
 
 ```markdown
 ## Plan hygiene

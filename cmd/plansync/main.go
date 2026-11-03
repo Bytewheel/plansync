@@ -14,6 +14,7 @@ import (
 
 	"bytewheel/plansync/internal/brief"
 	"bytewheel/plansync/internal/claim"
+	"bytewheel/plansync/internal/doclog"
 	"bytewheel/plansync/internal/report"
 	"bytewheel/plansync/internal/syncer"
 	"bytewheel/plansync/internal/verify"
@@ -34,6 +35,8 @@ Usage:
   plansync sync  [plans...] [flags]     refresh tool-owned plan regions
   plansync brief [plans...] [flags]     session-start digest: findings +
                                         remaining work + open checkboxes
+  plansync log   [plan] [flags]         append a dated doc-log entry built
+                                        from flags + current git state
 
 Arguments are plan files or directories (default: .). Directories are walked
 for markdown files whose names look like plans (plan, roadmap, todo,
@@ -47,9 +50,17 @@ Flags:
   --verbose         audit: also print ok claims individually
   --fail            audit: exit non-zero on stale/moved/missing findings
   --policy p        sync: markers (default) | heuristic | report
-  --apply           sync: write changes (default: preview diff only)
-  --no-backup       sync: skip the .bak backup when applying
+  --apply           sync/log: write changes (default: preview diff only)
+  --no-backup       sync/log: skip the .bak backup when applying
   --max-lines n     brief: cap the digest at n lines (default 40)
+  --date d          log: entry date, YYYY-MM-DD (default today)
+  --subject s       log: entry subject for the heading
+  --diagnosis s     log: diagnosis text
+  --fixes s         log: fixes text
+  --tests s         log: test-count text
+  --deploy s        log: deploy transcript text
+  --template path   log: template file (default: .plansync/log-template.md
+                    from a candidate repo or the plan dir; built-in otherwise)
 
 Sync policies:
   markers     rewrite plansync marker regions and re-anchor moved
@@ -61,14 +72,21 @@ Sync policies:
 }
 
 type opts struct {
-	repos    []string
-	json     bool
-	verbose  bool
-	fail     bool
-	policy   string
-	apply    bool
-	noBackup bool
-	maxLines int
+	repos     []string
+	json      bool
+	verbose   bool
+	fail      bool
+	policy    string
+	apply     bool
+	noBackup  bool
+	maxLines  int
+	date      string
+	subject   string
+	diagnosis string
+	fixes     string
+	tests     string
+	deploy    string
+	template  string
 }
 
 func run(args []string) error {
@@ -88,7 +106,7 @@ func run(args []string) error {
 	}
 	sub, targets := pos[0], pos[1:]
 	switch sub {
-	case "audit", "sync", "brief":
+	case "audit", "sync", "brief", "log":
 	default:
 		usage()
 		return fmt.Errorf("unknown subcommand %q", sub)
@@ -112,6 +130,9 @@ func run(args []string) error {
 	}
 	if sub == "brief" {
 		return runBrief(plans, o)
+	}
+	if sub == "log" {
+		return runLog(plans, o)
 	}
 	return runSync(plans, o)
 }
@@ -192,6 +213,88 @@ func runBrief(plans []string, o opts) error {
 		return brief.JSON(digests, os.Stdout)
 	}
 	brief.Render(os.Stdout, digests, o.maxLines)
+	return nil
+}
+
+func runLog(plans []string, o opts) error {
+	if len(plans) != 1 {
+		return fmt.Errorf("log appends to exactly one plan (got %d)", len(plans))
+	}
+	p := plans[0]
+	lp, err := loadPlan(p, o.repos)
+	if err != nil {
+		return err
+	}
+	if len(lp.repos) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: no candidate repos discovered; entry will carry no git state")
+	}
+	tmpl, src, err := doclog.FindTemplate(o.template, lp.abs, lp.repos)
+	if err != nil {
+		return err
+	}
+	entry := doclog.Build(doclog.Options{
+		Date:      o.date,
+		Subject:   o.subject,
+		Diagnosis: o.diagnosis,
+		Fixes:     o.fixes,
+		Tests:     o.tests,
+		Deploy:    o.deploy,
+		Template:  tmpl,
+	}, lp.v)
+	newDoc := doclog.Append(lp.doc, entry)
+	type logOut struct {
+		File     string   `json:"file"`
+		Template string   `json:"template,omitempty"`
+		Entry    []string `json:"entry"`
+		Applied  bool     `json:"applied"`
+	}
+	out := logOut{File: p, Template: src, Entry: entry}
+	if o.json {
+		defer func() {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(out)
+		}()
+	} else {
+		fmt.Printf("== %s\n", p)
+		if src != "" {
+			fmt.Printf("   template: %s\n", src)
+		}
+		for _, l := range entry {
+			fmt.Println(l)
+		}
+	}
+	if !o.apply {
+		if !o.json {
+			fmt.Println("\n   preview only; --apply writes (with a .bak backup unless --no-backup)")
+		}
+		return nil
+	}
+	if !o.noBackup {
+		if err := os.WriteFile(p+".bak", []byte(lp.doc), 0o644); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(p, []byte(newDoc), 0o644); err != nil {
+		return err
+	}
+	out.Applied = true
+	if !o.json {
+		fmt.Printf("   appended %d line(s) to %s; backup at %s.bak\n", len(entry), p, p)
+	}
+	// Post-apply re-audit, same contract as sync: report what audit still
+	// finds (historical sections of the plan may legitimately be stale).
+	nv := verify.New(lp.repos, filepath.Dir(lp.abs), newDoc)
+	bad := 0
+	for _, r := range nv.Verify(claim.Parse(newDoc)) {
+		switch r.Status {
+		case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
+			bad++
+		}
+	}
+	if !o.json {
+		fmt.Printf("   re-audit: %d finding(s) (includes pre-existing plan history)\n", bad)
+	}
 	return nil
 }
 
@@ -378,6 +481,13 @@ func newFlagSet(o *opts) *flagSet {
 	fs.inner.BoolVar(&o.apply, "apply", false, "")
 	fs.inner.BoolVar(&o.noBackup, "no-backup", false, "")
 	fs.inner.IntVar(&o.maxLines, "max-lines", 40, "")
+	fs.inner.StringVar(&o.date, "date", "", "")
+	fs.inner.StringVar(&o.subject, "subject", "", "")
+	fs.inner.StringVar(&o.diagnosis, "diagnosis", "", "")
+	fs.inner.StringVar(&o.fixes, "fixes", "", "")
+	fs.inner.StringVar(&o.tests, "tests", "", "")
+	fs.inner.StringVar(&o.deploy, "deploy", "", "")
+	fs.inner.StringVar(&o.template, "template", "", "")
 	return fs
 }
 
@@ -399,6 +509,13 @@ func splitFlags(args []string) (flags, pos []string, err error) {
 		"-repo": true, "--repo": true,
 		"-policy": true, "--policy": true,
 		"-max-lines": true, "--max-lines": true,
+		"-date": true, "--date": true,
+		"-subject": true, "--subject": true,
+		"-diagnosis": true, "--diagnosis": true,
+		"-fixes": true, "--fixes": true,
+		"-tests": true, "--tests": true,
+		"-deploy": true, "--deploy": true,
+		"-template": true, "--template": true,
 	}
 	i := 0
 	for i < len(args) {

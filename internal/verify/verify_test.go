@@ -41,6 +41,13 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
+func run(t *testing.T, args ...string) {
+	t.Helper()
+	if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %v\n%s", args, err, out)
+	}
+}
+
 func TestVerifyGitTreeStaleAndOK(t *testing.T) {
 	gitAvailable(t)
 	dir := t.TempDir()
@@ -85,6 +92,22 @@ func TestVerifyGitTreeReportsUncommittedWork(t *testing.T) {
 	r := v.Verify(claim.Parse(doc))
 	if len(r) != 1 || r[0].Status != StatusStale {
 		t.Fatalf("expected stale (file not yet tracked), got %+v", r)
+	}
+}
+
+func TestVerifyGitTreeUnstagedModificationIsOK(t *testing.T) {
+	gitAvailable(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+	write(t, filepath.Join(dir, "src/x.go"), "package x\n")
+	run(t, "git", "-C", dir, "add", "-A")
+	run(t, "git", "-C", dir, "commit", "-q", "-m", "x")
+	write(t, filepath.Join(dir, "src/x.go"), "package x // changed\n")
+	doc := "```\n M src/x.go\n```\n"
+	v := New([]string{dir}, dir, doc)
+	r := v.Verify(claim.Parse(doc))
+	if len(r) != 1 || r[0].Status != StatusOK {
+		t.Fatalf("unstaged ' M' entry must verify ok, got %+v", r)
 	}
 }
 

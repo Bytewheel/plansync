@@ -129,6 +129,26 @@ func TestExtractSectionsNone(t *testing.T) {
 	}
 }
 
+func TestExtractSectionsStopAtDatedHeading(t *testing.T) {
+	doc := "# plan\n\n## Remaining steps\n\n- [ ] do the thing\n\n### 2026-11-02 — session log\n\n**Diagnosis:** history, not work\n\n## Next steps\n\nlater\n"
+	secs := ExtractSections(doc)
+	if len(secs) != 2 {
+		t.Fatalf("want 2 sections, got %d: %+v", len(secs), secs)
+	}
+	joined := strings.Join(secs[0].Body, "\n")
+	if strings.Contains(joined, "session log") || strings.Contains(joined, "Diagnosis") {
+		t.Fatalf("dated log entry must terminate the section, body: %q", joined)
+	}
+	if !strings.Contains(joined, "do the thing") {
+		t.Fatalf("section body lost its content: %q", joined)
+	}
+	// A dated heading is never a section candidate, even with vocab words.
+	doc2 := "## work\n\n### 2026-11-02 — remaining fixes applied\n\nhistory\n"
+	if secs := ExtractSections(doc2); len(secs) != 0 {
+		t.Fatalf("dated heading must not be extracted: %+v", secs)
+	}
+}
+
 func TestCheckboxText(t *testing.T) {
 	for in, want := range map[string]string{
 		"- [ ] put_event stamping": "put_event stamping",
