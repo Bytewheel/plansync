@@ -51,7 +51,7 @@ var (
 	ipv4Re     = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
 	cidrRe     = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$`)
 	versionRe  = regexp.MustCompile(`^\d+(\.\d+)+$`)
-	protoRe    = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*/\d`)
+	protoRe    = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*/\d+([./]\d+)*$`)
 	moduleRe   = regexp.MustCompile(`^(\S+?)::`)
 	fenceRe    = regexp.MustCompile("^(\\s{0,3})(```|~~~)")
 

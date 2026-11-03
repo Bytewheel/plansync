@@ -55,3 +55,16 @@
       matching of claimed counts against gate output.
 - [x] Optional color output (`--color auto|always|never`); `--fail-on`
       granularity.
+
+## M7 — Organic validation (planned)
+
+- [ ] Run `docs/ORGANIC-TEST.md` against HOT, rozelynx, and carlton-audio at
+      their next session stopping points: audit/brief spot-checks, sync/log
+      writes on real plans, `init` for rozelynx, then AGENTS.md/plugin
+      embedding so the next sessions there use it unprompted.
+- [ ] 2026-11-02 pre-flight already landed: `protoRe` end-anchor (numbered
+      doc paths), `ageNote` future-date guard, `downloads` in the suffix-index
+      skip list — all corpus-regression-clean.
+- [ ] Open follow-up: name discovery does not match numbered doc corpora
+      (`docs/NN-*.md`); explicit paths are the workaround.
+

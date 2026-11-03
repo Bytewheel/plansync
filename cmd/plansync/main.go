@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"bytewheel/plansync/internal/brief"
 	"bytewheel/plansync/internal/claim"
@@ -537,7 +538,17 @@ func ageNote(doc string, v *verify.Verifier) string {
 	if len(head) > 4000 {
 		head = head[:4000]
 	}
-	d := dateRe.FindString(head)
+	// A plan cannot be dated in the future; documents about time handling
+	// (Y2038 remediation) are full of future dates in prose. Take the first
+	// date that is not after today.
+	today := time.Now().Format("2006-01-02")
+	var d string
+	for _, m := range dateRe.FindAllString(head, -1) {
+		if m <= today {
+			d = m
+			break
+		}
+	}
 	if d == "" {
 		return ""
 	}

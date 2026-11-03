@@ -505,7 +505,7 @@ func (v *Verifier) resolveAny(p string) (resolution, bool) {
 
 var indexSkipDirs = map[string]bool{
 	".git": true, "node_modules": true, "target": true, ".cache": true,
-	"vendor": true, "moz-src": true, "dictionaries": true,
+	"vendor": true, "moz-src": true, "dictionaries": true, "downloads": true,
 }
 
 func (v *Verifier) suffixLookup(p string) (resolution, bool) {

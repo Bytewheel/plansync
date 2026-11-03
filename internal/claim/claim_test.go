@@ -112,6 +112,34 @@ func TestParseAnchorGuards(t *testing.T) {
 	}
 }
 
+func TestParseNumericDirPaths(t *testing.T) {
+	// Digit-led directory components (docs/04-validation.md) must stay
+	// path claims; version-pair tokens (http/1.1, ns/2, llvm-19/20/21,
+	// glibc/2.34) must not.
+	doc := "see `docs/04-validation.md`, `docs/00-scope.md`, `v2/302.html`\n" +
+		"versions `http/1.1`, `ns/2`, `llvm-19/20/21`, `omnical-smoke/1.0`, `glibc/2.34`\n"
+	want := map[string]bool{
+		"docs/04-validation.md": false,
+		"docs/00-scope.md":      false,
+		"v2/302.html":           false,
+	}
+	for _, c := range Parse(doc) {
+		if c.Kind != KindPath {
+			continue
+		}
+		if _, ok := want[c.Path]; !ok {
+			t.Errorf("unexpected path claim %q", c.Path)
+			continue
+		}
+		want[c.Path] = true
+	}
+	for p, seen := range want {
+		if !seen {
+			t.Errorf("path claim missing: %q", p)
+		}
+	}
+}
+
 func TestParseCommitsBranchesPaths(t *testing.T) {
 	doc := "**Repo:** `~/router-dav/rustical`, branch `omnical-scheduling`\n" +
 		"| Server | `/home/user/router-dav/rustical` | `Bytewheel/Omnical-Server` | `35049a53` |\n" +
