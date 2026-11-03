@@ -93,6 +93,20 @@ a candidate repo or next to the plan, `--template` to override, built-in
 default otherwise; placeholders `{{date}} {{subject}} {{diagnosis}} {{fixes}}
 {{tests}} {{deploy}} {{git}}`.
 
+### plansync init
+
+```sh
+~/Documents/ByteWheel/plansync/bin/plansync init <plan.md> --repo <repo> \
+  [--title s] [--date YYYY-MM-DD] [--apply]
+```
+
+`init` scaffolds a new continuation plan pre-filled with live git state:
+`**Repo:**` headers, `git-status` + `heads` marker regions (tool-owned —
+`sync` keeps them current), a "Remaining steps, in order" section, and a
+gotchas section. It previews by default, `--apply` writes (parent dirs
+created; existing files are never overwritten). A fresh scaffold audits
+clean and is a sync no-op by construction.
+
 ### plansync sync
 
 ```sh

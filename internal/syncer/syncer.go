@@ -197,7 +197,7 @@ func scanMarkers(lines []string, v *verify.Verifier) ([]Edit, []string) {
 			i++
 			continue
 		}
-		body, warn := markerBody(kind, args, v)
+		body, warn := MarkerBody(kind, args, v)
 		if warn != "" {
 			warnings = append(warnings, fmt.Sprintf("L%d: %s", i+1, warn))
 			i = end + 1
@@ -220,7 +220,12 @@ func scanMarkers(lines []string, v *verify.Verifier) ([]Edit, []string) {
 	return edits, warnings
 }
 
-func markerBody(kind string, args map[string]string, v *verify.Verifier) ([]string, string) {
+// MarkerBody renders the canonical current-state body for a marker region
+// of the given kind and args (see docs/FORMAT-SPEC.md §10). It returns a
+// warning string (and no body) when the marker is malformed or its repo is
+// not a worktree. Scaffolded plans use it so their pre-filled regions match
+// what sync would write.
+func MarkerBody(kind string, args map[string]string, v *verify.Verifier) ([]string, string) {
 	switch kind {
 	case "git-status":
 		repo := args["repo"]

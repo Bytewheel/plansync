@@ -40,6 +40,8 @@ plansync brief [plans...] [flags]     session-start digest: findings +
                                        remaining work + open checkboxes
 plansync log   [plan] [flags]         append a dated doc-log entry built
                                        from flags + current git state
+plansync init  <plan.md> [flags]      scaffold a continuation plan with
+                                       live git state + marker regions
 
 Flags:
   --repo path       candidate repository (repeatable)
@@ -47,10 +49,10 @@ Flags:
   --verbose         audit: also print ok claims individually
   --fail            audit: exit non-zero on stale/moved/missing findings
   --policy p        sync: markers (default) | heuristic | report
-  --apply           sync/log: write changes (default: preview diff only)
+  --apply           sync/log/init: write changes (default: preview only)
   --no-backup       sync/log: skip the .bak backup when applying
   --max-lines n     brief: cap the digest at n lines (default 40)
-  --date d          log: entry date, YYYY-MM-DD (default today)
+  --date d          log/init: date, YYYY-MM-DD (default today)
   --subject s       log: entry subject for the heading
   --diagnosis s     log: diagnosis text
   --fixes s         log: fixes text
@@ -58,6 +60,7 @@ Flags:
   --deploy s        log: deploy transcript text
   --template path   log: template file (default: .plansync/log-template.md
                     from a candidate repo or the plan dir; built-in otherwise)
+  --title s         init: plan title (default: derived from the file name)
 ```
 
 ## What gets checked
@@ -189,6 +192,41 @@ the plan, or `--template path`) substitutes `{{date}}`, `{{subject}}`,
 headings also terminate remaining-work excerpts in `brief`, keeping log
 history out of the work digest.
 
+## Scaffolding continuation plans
+
+`init` starts a new plan from live state instead of a blank page — repo
+headers, tool-owned marker regions, a remaining-work section, and a
+gotchas section, all pre-filled:
+
+```console
+$ plansync init CONTINUATION_PLAN.md --repo /opt/appliance --title "mirror finish" --apply
+== CONTINUATION_PLAN.md
+# Continuation plan — mirror finish (2026-11-02)
+
+**Repo:** `/opt/appliance`, branch `main`, HEAD `cafe1234`
+...
+## Status
+
+Working tree of `/opt/appliance`:
+
+<!-- plansync:begin git-status repo=/opt/appliance -->
+```
+ M appliance/src/mirror.rs
+```
+<!-- plansync:end -->
+...
+   created CONTINUATION_PLAN.md (41 line(s))
+   audit: 0 finding(s); sync: 0 edit(s) — a fresh scaffold should be 0/0
+```
+
+The marker bodies come from the same generator `sync` uses, so a fresh
+scaffold is a sync no-op; the headers and fenced state are audit grammar,
+so it audits 100% clean; `brief` hooks the "Remaining steps, in order"
+section from the start. `init` refuses to overwrite an existing file (no
+`--force`), creates parent directories, and derives the title from the
+file name when `--title` is omitted. With no discoverable repo it emits
+TODO placeholders instead of live state.
+
 ## Repository discovery
 
 In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
@@ -208,8 +246,9 @@ internal/verify    git/file verification, suffix index, re-anchoring
 internal/syncer    edit computation, marker regions, diff, apply
 internal/brief     session-start digest (findings + remaining work + checkboxes)
 internal/doclog    dated doc-log entry assembly (git state + template)
+internal/scaffold  continuation-plan scaffolding (live markers + headers)
 internal/report    audit rendering (human + JSON)
-docs/ROADMAP.md    milestones (M5 init, M6 plugin)
+docs/ROADMAP.md    milestones (M6 plugin + gate config)
 AGENTS.md          instructions for AI agents working in this repo — and the
                     snippet to paste into any repo whose plans should be audited
 ```

@@ -16,6 +16,7 @@ import (
 	"bytewheel/plansync/internal/claim"
 	"bytewheel/plansync/internal/doclog"
 	"bytewheel/plansync/internal/report"
+	"bytewheel/plansync/internal/scaffold"
 	"bytewheel/plansync/internal/syncer"
 	"bytewheel/plansync/internal/verify"
 )
@@ -37,6 +38,8 @@ Usage:
                                         remaining work + open checkboxes
   plansync log   [plan] [flags]         append a dated doc-log entry built
                                         from flags + current git state
+  plansync init  <plan.md> [flags]      scaffold a continuation plan with
+                                        live git state + marker regions
 
 Arguments are plan files or directories (default: .). Directories are walked
 for markdown files whose names look like plans (plan, roadmap, todo,
@@ -61,6 +64,7 @@ Flags:
   --deploy s        log: deploy transcript text
   --template path   log: template file (default: .plansync/log-template.md
                     from a candidate repo or the plan dir; built-in otherwise)
+  --title s         init: plan title (default: derived from the file name)
 
 Sync policies:
   markers     rewrite plansync marker regions and re-anchor moved
@@ -87,6 +91,7 @@ type opts struct {
 	tests     string
 	deploy    string
 	template  string
+	title     string
 }
 
 func run(args []string) error {
@@ -106,10 +111,17 @@ func run(args []string) error {
 	}
 	sub, targets := pos[0], pos[1:]
 	switch sub {
-	case "audit", "sync", "brief", "log":
+	case "audit", "sync", "brief", "log", "init":
 	default:
 		usage()
 		return fmt.Errorf("unknown subcommand %q", sub)
+	}
+	// init targets a file that does not exist yet; it bypasses collectPlans.
+	if sub == "init" {
+		if len(targets) != 1 {
+			return fmt.Errorf("init scaffolds exactly one plan file (got %d)", len(targets))
+		}
+		return runInit(targets[0], o)
 	}
 	if len(targets) == 0 {
 		targets = []string{"."}
@@ -213,6 +225,77 @@ func runBrief(plans []string, o opts) error {
 		return brief.JSON(digests, os.Stdout)
 	}
 	brief.Render(os.Stdout, digests, o.maxLines)
+	return nil
+}
+
+func runInit(path string, o opts) error {
+	if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
+		return fmt.Errorf("%s already exists; plansync init refuses to overwrite", path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	repos := verify.DetectRepos(o.repos, abs, nil)
+	v := verify.New(repos, filepath.Dir(abs), "")
+	if len(repos) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: no git repository found; scaffold will carry TODO placeholders (pass --repo)")
+	}
+	title := o.title
+	if title == "" {
+		title = scaffold.DefaultTitle(path)
+	}
+	entry := scaffold.Build(scaffold.Options{Title: title, Date: o.date}, v)
+	type initOut struct {
+		File    string   `json:"file"`
+		Title   string   `json:"title"`
+		Repos   []string `json:"repos,omitempty"`
+		Lines   []string `json:"lines"`
+		Applied bool     `json:"applied"`
+	}
+	out := initOut{File: path, Title: title, Repos: repos, Lines: entry}
+	if o.json {
+		defer func() {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(out)
+		}()
+	} else {
+		fmt.Printf("== %s\n", path)
+		for _, l := range entry {
+			fmt.Println(l)
+		}
+	}
+	if !o.apply {
+		if !o.json {
+			fmt.Println("\n   preview only; --apply writes (init refuses to overwrite)")
+		}
+		return nil
+	}
+	if err := scaffold.Write(path, entry); err != nil {
+		return err
+	}
+	out.Applied = true
+	if !o.json {
+		fmt.Printf("   created %s (%d line(s))\n", path, len(entry))
+	}
+	// Demonstrate the contract: a fresh scaffold audits clean and is a sync
+	// no-op.
+	doc := strings.Join(entry, "\n")
+	claims := claim.Parse(doc)
+	nv := verify.New(repos, filepath.Dir(abs), doc)
+	results := nv.Verify(claims)
+	bad := 0
+	for _, r := range results {
+		switch r.Status {
+		case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
+			bad++
+		}
+	}
+	edits, _ := syncer.Compute(strings.Split(doc, "\n"), nv, claims, results, syncer.PolicyMarkers)
+	if !o.json {
+		fmt.Printf("   audit: %d finding(s); sync: %d edit(s) — a fresh scaffold should be 0/0\n", bad, len(edits))
+	}
 	return nil
 }
 
@@ -488,6 +571,7 @@ func newFlagSet(o *opts) *flagSet {
 	fs.inner.StringVar(&o.tests, "tests", "", "")
 	fs.inner.StringVar(&o.deploy, "deploy", "", "")
 	fs.inner.StringVar(&o.template, "template", "", "")
+	fs.inner.StringVar(&o.title, "title", "", "")
 	return fs
 }
 
@@ -516,6 +600,7 @@ func splitFlags(args []string) (flags, pos []string, err error) {
 		"-tests": true, "--tests": true,
 		"-deploy": true, "--deploy": true,
 		"-template": true, "--template": true,
+		"-title": true, "--title": true,
 	}
 	i := 0
 	for i < len(args) {

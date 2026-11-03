@@ -38,10 +38,12 @@
       default; `--apply` writes with `.bak` backup and a post-apply
       re-audit; generated entries are audit-parseable and audit clean.
 
-## M5 — Init
+## M5 — Init (DONE)
 
-- [ ] `init` subcommand: scaffold a continuation plan with live git state,
-      repo headers, and marker regions pre-filled.
+- [x] `init` subcommand: scaffold a continuation plan with live git state,
+      repo headers, and marker regions pre-filled (git-status + heads).
+      Fresh scaffolds audit clean and are sync no-ops by construction;
+      refuses to overwrite existing files.
 
 ## M6 — Integration
 
