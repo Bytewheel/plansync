@@ -351,6 +351,24 @@ func atoi(s string) int {
 	return n
 }
 
+// CountMatches returns the count-shaped substrings of s, in first-match
+// order, deduplicated — the same shapes the parser lifts into count claims.
+// Gate verification uses it to compare claimed counts against command
+// output.
+func CountMatches(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, re := range countRes {
+		for _, m := range re.FindAllString(s, -1) {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
 func RepoHints(doc string) []string {
 	var out []string
 	seen := map[string]bool{}

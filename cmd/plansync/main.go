@@ -15,6 +15,7 @@ import (
 	"bytewheel/plansync/internal/brief"
 	"bytewheel/plansync/internal/claim"
 	"bytewheel/plansync/internal/doclog"
+	"bytewheel/plansync/internal/gates"
 	"bytewheel/plansync/internal/report"
 	"bytewheel/plansync/internal/scaffold"
 	"bytewheel/plansync/internal/syncer"
@@ -52,8 +53,16 @@ Flags:
   --json            machine-readable output
   --verbose         audit: also print ok claims individually
   --fail            audit: exit non-zero on stale/moved/missing findings
+  --fail-on list    audit: statuses that trigger --fail, comma-separated
+                    (default stale,moved,missing; also moved, unknown, info,
+                    ok)
+  --gates           audit: run .plansync.toml gate commands and verify the
+                    plan's numeric claims against their output
+  --gate-config p   audit: explicit gate config path (default: .plansync.toml
+                    from a candidate repo or the plan dir)
+  --color when      audit: auto (default) | always | never
   --policy p        sync: markers (default) | heuristic | report
-  --apply           sync/log: write changes (default: preview diff only)
+  --apply           sync/log/init: write changes (default: preview only)
   --no-backup       sync/log: skip the .bak backup when applying
   --max-lines n     brief: cap the digest at n lines (default 40)
   --date d          log: entry date, YYYY-MM-DD (default today)
@@ -76,22 +85,26 @@ Sync policies:
 }
 
 type opts struct {
-	repos     []string
-	json      bool
-	verbose   bool
-	fail      bool
-	policy    string
-	apply     bool
-	noBackup  bool
-	maxLines  int
-	date      string
-	subject   string
-	diagnosis string
-	fixes     string
-	tests     string
-	deploy    string
-	template  string
-	title     string
+	repos      []string
+	json       bool
+	verbose    bool
+	fail       bool
+	policy     string
+	apply      bool
+	noBackup   bool
+	maxLines   int
+	date       string
+	subject    string
+	diagnosis  string
+	fixes      string
+	tests      string
+	deploy     string
+	template   string
+	title      string
+	gatesOn    bool
+	gateConfig string
+	color      string
+	failOn     string
 }
 
 func run(args []string) error {
@@ -178,7 +191,31 @@ func loadPlan(path string, repoFlags []string) (loadedPlan, error) {
 	}, nil
 }
 
+func parseFailOn(s string) (map[verify.Status]bool, error) {
+	if s == "" {
+		s = "stale,moved,missing"
+	}
+	set := map[verify.Status]bool{}
+	for _, part := range strings.Split(s, ",") {
+		switch st := verify.Status(strings.TrimSpace(part)); st {
+		case verify.StatusOK, verify.StatusStale, verify.StatusMoved, verify.StatusMissing, verify.StatusUnknown, verify.StatusInfo:
+			set[st] = true
+		default:
+			return nil, fmt.Errorf("unknown status %q in --fail-on (want ok, stale, moved, missing, unknown, info)", part)
+		}
+	}
+	return set, nil
+}
+
 func runAudit(plans []string, o opts) error {
+	failSet, err := parseFailOn(o.failOn)
+	if err != nil {
+		return err
+	}
+	color, err := parseColor(o.color)
+	if err != nil {
+		return err
+	}
 	var reps []report.Report
 	anyBad := false
 	for _, p := range plans {
@@ -188,14 +225,39 @@ func runAudit(plans []string, o opts) error {
 		}
 		results := lp.v.Verify(lp.claims)
 		ageNote := ageNote(lp.doc, lp.v)
+		var gateRuns []gates.Run
+		if o.gatesOn {
+			cfgPath, ok, err := gates.Find(o.gateConfig, p, lp.repos)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				fmt.Fprintf(os.Stderr, "warning: --gates given but no %s found for %s\n", gates.ConfigFile, p)
+			} else {
+				gs, err := gates.Load(cfgPath)
+				if err != nil {
+					return err
+				}
+				gateRuns = gates.RunAll(gs, filepath.Dir(cfgPath))
+				results = gates.VerifyCounts(results, gateRuns)
+			}
+		}
 		bad := false
 		for _, r := range results {
-			switch r.Status {
-			case verify.StatusStale, verify.StatusMoved, verify.StatusMissing:
+			if failSet[r.Status] {
 				bad = true
 			}
 		}
-		reps = append(reps, report.Build(p, lp.repos, results, ageNote))
+		// A failed gate contradicts "all gates green" claims: it fails under
+		// the stale umbrella.
+		if failSet[verify.StatusStale] {
+			for _, g := range gateRuns {
+				if g.Failed {
+					bad = true
+				}
+			}
+		}
+		reps = append(reps, report.Build(p, lp.repos, results, ageNote, gateRuns))
 		anyBad = anyBad || bad
 	}
 	if o.json {
@@ -203,12 +265,25 @@ func runAudit(plans []string, o opts) error {
 			return err
 		}
 	} else {
-		report.Render(reps, o.verbose, os.Stdout)
+		report.Render(reps, o.verbose, color, os.Stdout)
 	}
 	if o.fail && anyBad {
 		os.Exit(1)
 	}
 	return nil
+}
+
+func parseColor(s string) (bool, error) {
+	switch s {
+	case "", "auto":
+		fi, err := os.Stdout.Stat()
+		return err == nil && fi.Mode()&os.ModeCharDevice != 0, nil
+	case "always":
+		return true, nil
+	case "never":
+		return false, nil
+	}
+	return false, fmt.Errorf("unknown --color %q (want auto, always, or never)", s)
 }
 
 func runBrief(plans []string, o opts) error {
@@ -572,6 +647,10 @@ func newFlagSet(o *opts) *flagSet {
 	fs.inner.StringVar(&o.deploy, "deploy", "", "")
 	fs.inner.StringVar(&o.template, "template", "", "")
 	fs.inner.StringVar(&o.title, "title", "", "")
+	fs.inner.BoolVar(&o.gatesOn, "gates", false, "")
+	fs.inner.StringVar(&o.gateConfig, "gate-config", "", "")
+	fs.inner.StringVar(&o.color, "color", "auto", "")
+	fs.inner.StringVar(&o.failOn, "fail-on", "", "")
 	return fs
 }
 
@@ -601,6 +680,9 @@ func splitFlags(args []string) (flags, pos []string, err error) {
 		"-deploy": true, "--deploy": true,
 		"-template": true, "--template": true,
 		"-title": true, "--title": true,
+		"-gate-config": true, "--gate-config": true,
+		"-color": true, "--color": true,
+		"-fail-on": true, "--fail-on": true,
 	}
 	i := 0
 	for i < len(args) {

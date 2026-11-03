@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"bytewheel/plansync/internal/gates"
 	"bytewheel/plansync/internal/verify"
 )
 
@@ -18,9 +19,10 @@ type Report struct {
 	Results   []verify.Result `json:"results"`
 	AgeNote   string          `json:"age_note,omitempty"`
 	Freshness float64         `json:"freshness"`
+	Gates     []gates.Run     `json:"gates,omitempty"`
 }
 
-func Build(file string, repos []string, results []verify.Result, ageNote string) Report {
+func Build(file string, repos []string, results []verify.Result, ageNote string, gateRuns []gates.Run) Report {
 	ok, bad := 0, 0
 	for _, r := range results {
 		switch r.Status {
@@ -34,7 +36,7 @@ func Build(file string, repos []string, results []verify.Result, ageNote string)
 	if ok+bad > 0 {
 		f = float64(ok) / float64(ok+bad)
 	}
-	return Report{File: file, Repos: repos, Results: results, AgeNote: ageNote, Freshness: f}
+	return Report{File: file, Repos: repos, Results: results, AgeNote: ageNote, Freshness: f, Gates: gateRuns}
 }
 
 func JSON(reps []Report, w io.Writer) error {
@@ -43,7 +45,29 @@ func JSON(reps []Report, w io.Writer) error {
 	return enc.Encode(reps)
 }
 
-func Render(reps []Report, verbose bool, w io.Writer) bool {
+// ANSI color codes by audit status. ok is dimmed rather than bright green
+// so findings stand out.
+var statusColor = map[verify.Status]string{
+	verify.StatusStale:   "\x1b[31m", // red
+	verify.StatusMissing: "\x1b[31m", // red
+	verify.StatusMoved:   "\x1b[33m", // yellow
+	verify.StatusOK:      "\x1b[32m", // green
+	verify.StatusInfo:    "\x1b[36m", // cyan
+	verify.StatusUnknown: "\x1b[2m",  // dim
+}
+
+func colorize(color bool, status verify.Status, s string) string {
+	if !color {
+		return s
+	}
+	c, ok := statusColor[status]
+	if !ok {
+		return s
+	}
+	return c + s + "\x1b[0m"
+}
+
+func Render(reps []Report, verbose, color bool, w io.Writer) bool {
 	anyBad := false
 	totals := map[verify.Status]int{}
 	for _, rep := range reps {
@@ -62,7 +86,7 @@ func Render(reps []Report, verbose bool, w io.Writer) bool {
 			case r.Status == verify.StatusOK:
 				okByKind[string(r.Kind)]++
 				if verbose {
-					fmt.Fprintf(w, "   %-7s L%-4d %-9s %s\n", r.Status, r.Line, r.Kind, truncate(r.Message, 140))
+					fmt.Fprintf(w, "   %-7s L%-4d %-9s %s\n", colorize(color, r.Status, string(r.Status)), r.Line, r.Kind, truncate(r.Message, 140))
 				}
 			case r.Status == verify.StatusInfo && (r.Kind == "checkbox" || r.Kind == "count"):
 				if r.Kind == "checkbox" {
@@ -79,7 +103,7 @@ func Render(reps []Report, verbose bool, w io.Writer) bool {
 				unknown++
 			default:
 				anyBad = true
-				line := fmt.Sprintf("   %-7s L%-4d %-9s %s", r.Status, r.Line, r.Kind, truncate(r.Message, 200))
+				line := fmt.Sprintf("   %-7s L%-4d %-9s %s", colorize(color, r.Status, string(r.Status)), r.Line, r.Kind, truncate(r.Message, 200))
 				if r.Suggestion != "" {
 					line += "  -> " + r.Suggestion
 				}
@@ -92,30 +116,38 @@ func Render(reps []Report, verbose bool, w io.Writer) bool {
 		}
 		sort.Strings(oks)
 		if len(oks) > 0 {
-			fmt.Fprintf(w, "   ok      %s\n", strings.Join(oks, ", "))
+			fmt.Fprintf(w, "   %-7s %s\n", colorize(color, verify.StatusOK, "ok"), strings.Join(oks, ", "))
 		}
 		if unknown > 0 {
-			fmt.Fprintf(w, "   info    %d claims did not resolve to any repo (paths outside candidates, remotes-only refs)\n", unknown)
+			fmt.Fprintf(w, "   %-7s %d claims did not resolve to any repo (paths outside candidates, remotes-only refs)\n", colorize(color, verify.StatusUnknown, "info"), unknown)
 		}
 		if openBoxes+doneBoxes > 0 {
-			boxLine := fmt.Sprintf("   info    checkboxes: %d open, %d done", openBoxes, doneBoxes)
+			boxLine := fmt.Sprintf("   %-7s checkboxes: %d open, %d done", colorize(color, verify.StatusInfo, "info"), openBoxes, doneBoxes)
 			if openBoxes > 0 && openBoxes <= 10 {
 				boxLine += " (" + strings.Join(openLines, ", ") + ")"
 			}
 			fmt.Fprintln(w, boxLine)
 		}
 		if counts > 0 {
-			fmt.Fprintf(w, "   info    %d numeric claims (test/gate counts) not verified; re-run gates to confirm\n", counts)
+			fmt.Fprintf(w, "   %-7s %d numeric claims (test/gate counts) not verified; re-run gates to confirm\n", colorize(color, verify.StatusInfo, "info"), counts)
+		}
+		for _, g := range rep.Gates {
+			if g.Failed {
+				anyBad = true
+				fmt.Fprintf(w, "   %-7s gate %-20s FAILED (%s)\n", colorize(color, verify.StatusStale, "stale"), g.Gate.Name, g.Error)
+			} else {
+				fmt.Fprintf(w, "   %-7s gate %-20s ok\n", colorize(color, verify.StatusOK, "ok"), g.Gate.Name)
+			}
 		}
 		if rep.AgeNote != "" {
-			fmt.Fprintf(w, "   info    %s\n", rep.AgeNote)
+			fmt.Fprintf(w, "   %-7s %s\n", colorize(color, verify.StatusInfo, "info"), rep.AgeNote)
 		}
 		fmt.Fprintf(w, "   freshness: %.0f%%\n\n", rep.Freshness*100)
 	}
 	fmt.Fprintf(w, "audited %d plan(s):", len(reps))
 	for _, s := range []verify.Status{verify.StatusOK, verify.StatusStale, verify.StatusMoved, verify.StatusMissing, verify.StatusUnknown, verify.StatusInfo} {
 		if totals[s] > 0 {
-			fmt.Fprintf(w, " %d %s", totals[s], s)
+			fmt.Fprintf(w, " %d %s", totals[s], colorize(color, s, string(s)))
 		}
 	}
 	fmt.Fprintln(w)

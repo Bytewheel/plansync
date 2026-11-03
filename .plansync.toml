@@ -1,0 +1,10 @@
+# plansync gate config: commands whose output verifies the numeric claims
+# in this repo's plans (audit --gates runs them).
+
+[[gate]]
+name = "go test"
+command = "env -u GOROOT go test ./..."
+
+[[gate]]
+name = "go vet"
+command = "env -u GOROOT go vet ./..."

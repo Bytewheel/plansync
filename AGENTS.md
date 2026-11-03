@@ -61,7 +61,10 @@ For a whole tree at once:
 
 `--json` gives the same data machine-readably; `--fail` exits non-zero when
 anything stale/moved/missing is found (CI-able); `--verbose` prints the `ok`
-claims individually.
+claims individually. `--gates` additionally runs the repo's `.plansync.toml`
+gate commands and verifies the plan's numeric claims against their output
+(see docs/FORMAT-SPEC.md §16). `--color always|never` overrides the
+terminal auto-detection; `--fail-on` narrows which statuses trip `--fail`.
 
 ## Session end — before handing off
 
@@ -216,6 +219,11 @@ cd ~/Documents/ByteWheel/plansync
 env -u GOROOT go test ./...     # parser + verifier unit tests
 env -u GOROOT go vet ./...
 ```
+
+The repo's own gates live in `.plansync.toml` (go test, go vet); run
+`./bin/plansync audit docs/ROADMAP.md --gates` to exercise them. The
+opencode plugin (`opencode/plansync.ts`) type-checks with
+`cd opencode && npx tsc -p tsconfig.json`.
 
 House style follows Determinism: stdlib-only Go, no external deps, flags
 interspersed with positionals, package docs in `docs/`.

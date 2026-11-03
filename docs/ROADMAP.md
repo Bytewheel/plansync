@@ -45,10 +45,13 @@
       Fresh scaffolds audit clean and are sync no-ops by construction;
       refuses to overwrite existing files.
 
-## M6 — Integration
+## M6 — Integration (DONE)
 
-- [ ] opencode plugin (`plansync_*` tools) mirroring the Determinism plugin
-      pattern, so agents can audit without shell access to the binary path.
-- [ ] Gate configuration per repo (`.plansync.toml`): commands to re-run for
-      count verification (M1 reports them as unverified).
-- [ ] Optional color output; `--fail-on` granularity.
+- [x] opencode plugin (`plansync_*` tools: audit, brief, sync, log, init)
+      mirroring the Determinism plugin pattern, so agents can audit without
+      shell access to the binary path.
+- [x] Gate configuration per repo (`.plansync.toml`): commands to re-run for
+      count verification (`audit --gates`), with shape- and number-level
+      matching of claimed counts against gate output.
+- [x] Optional color output (`--color auto|always|never`); `--fail-on`
+      granularity.

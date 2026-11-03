@@ -36,6 +36,7 @@ type Result struct {
 	Start      int        `json:"start,omitempty"`
 	End        int        `json:"end,omitempty"`
 	Hash       string     `json:"hash,omitempty"`
+	Detail     string     `json:"detail,omitempty"`
 }
 
 type Verifier struct {
@@ -138,7 +139,7 @@ func (v *Verifier) Verify(claims []claim.Claim) []Result {
 			}
 			results = append(results, Result{Kind: c.Kind, Status: StatusInfo, Line: c.Line, Message: msg})
 		case claim.KindCount:
-			results = append(results, Result{Kind: c.Kind, Status: StatusInfo, Line: c.Line, Message: "numeric claim not verified: " + c.Detail})
+			results = append(results, Result{Kind: c.Kind, Status: StatusInfo, Line: c.Line, Message: "numeric claim not verified: " + c.Detail, Detail: c.Detail})
 		}
 	}
 	sort.SliceStable(results, func(i, j int) bool {

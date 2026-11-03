@@ -48,6 +48,13 @@ Flags:
   --json            machine-readable output
   --verbose         audit: also print ok claims individually
   --fail            audit: exit non-zero on stale/moved/missing findings
+  --fail-on list    audit: statuses that trigger --fail, comma-separated
+                    (default stale,moved,missing)
+  --gates           audit: run .plansync.toml gate commands and verify the
+                    plan's numeric claims against their output
+  --gate-config p   audit: explicit gate config path (default: .plansync.toml
+                    from a candidate repo or the plan dir)
+  --color when      audit: auto (default) | always | never
   --policy p        sync: markers (default) | heuristic | report
   --apply           sync/log/init: write changes (default: preview only)
   --no-backup       sync/log: skip the .bak backup when applying
@@ -73,13 +80,42 @@ Flags:
 | `file.rs:NNN` anchors | backticked (and elided `:NNN` continuation) refs; ranges `:A-B` | line bounds, then symbol context from the same plan line; moved anchors get a re-anchor suggestion |
 | file paths | backticked paths (incl. `~/`, `/abs`, dir/file.rs::symbol) | direct join, then suffix match across an indexed repo (plans routinely strip leading dirs like `crates/frontend/public/templates/`) |
 | checkboxes | `- [ ]` / `- [x]` | counted, open ones listed by line |
-| test/gate counts | `N tests`, `OK=n FAIL=n`, `n/m` | reported as unverified (M2: gate config) |
+| test/gate counts | `N tests`, `OK=n FAIL=n`, `n/m` | `audit --gates` runs `.plansync.toml` commands and matches claimed counts against their output (below) |
 
 Statuses: `ok` (claim holds), `stale` (contradicted), `moved` (anchor content
 relocated, suggestion given), `missing` (claimed file gone), `unknown`
 (unresolvable — other-host paths, bare filenames, remotes), `info`.
 
 Freshness = ok / (ok + stale + moved + missing).
+
+## Gate configuration
+
+Numeric claims (`16 tests`, `OK=61 FAIL=0`, …) are reported as unverified
+unless `--gates` is given. Gates are shell commands declared in a
+`.plansync.toml` at a candidate repo root (or next to the plan):
+
+```toml
+[[gate]]
+name = "go test"
+command = "go test ./..."
+
+[[gate]]
+name = "go vet"
+command = "go vet ./..."
+```
+
+`audit --gates` runs them (in the config's directory, combined output
+captured) and verifies each count claim: ok when the claimed numbers appear
+in the output — verbatim ("16 tests" seen as "16 tests") or across shapes
+("61 tests" is confirmed by "OK=61 FAIL=0") — stale with the actual numbers
+when the output carries counts but not the claimed one, info when the output
+has no count-shaped lines at all. A failing gate command is reported as a
+`stale`-class finding (it contradicts "all gates green" claims) and trips
+`--fail`.
+
+Color: `--color always|never|auto` (default auto: colored when stdout is a
+terminal). `--fail-on stale,moved,missing` (the default) narrows or widens
+which statuses trip `--fail` — e.g. `--fail-on stale` for CI gate runs.
 
 ## Syncing plans back to current state
 
@@ -227,6 +263,20 @@ section from the start. `init` refuses to overwrite an existing file (no
 file name when `--title` is omitted. With no discoverable repo it emits
 TODO placeholders instead of live state.
 
+## opencode plugin
+
+`opencode/plansync.ts` exposes the CLI as custom tools (`plansync_audit`,
+`plansync_brief`, `plansync_sync`, `plansync_log`, `plansync_init`) so
+agents can audit plans without shell access to the binary path. The binary
+is located via `PLANSYNC_BIN`, then `bin/plansync`, and auto-built from
+source if missing. Register it with:
+
+```json
+{ "plugin": ["file:///home/burningserenity/Documents/ByteWheel/plansync/opencode/plansync.ts"] }
+```
+
+(Type-check: `cd opencode && npm install && npx tsc -p tsconfig.json`.)
+
 ## Repository discovery
 
 In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
@@ -247,8 +297,10 @@ internal/syncer    edit computation, marker regions, diff, apply
 internal/brief     session-start digest (findings + remaining work + checkboxes)
 internal/doclog    dated doc-log entry assembly (git state + template)
 internal/scaffold  continuation-plan scaffolding (live markers + headers)
-internal/report    audit rendering (human + JSON)
-docs/ROADMAP.md    milestones (M6 plugin + gate config)
+internal/gates     .plansync.toml gate runner + count verification
+internal/report    audit rendering (human + JSON, color)
+opencode/          opencode plugin (plansync_* tools)
+docs/ROADMAP.md    milestones
 AGENTS.md          instructions for AI agents working in this repo — and the
                     snippet to paste into any repo whose plans should be audited
 ```

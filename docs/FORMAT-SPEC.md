@@ -103,8 +103,8 @@ must be dot/slash/colon-free and non-hex. Verified against local
 ## 7. counts
 
 `\bOK=(\d+)\s+FAIL=(\d+)\b`, `\b(\d+)\s+tests?\b`, `\b(\d+)\s+failures?\b`,
-`\b(\d+)\s+errors?\b`, `\b(\d+)/(\d+)\b`. Reported as informational; M2 adds
-gate configuration to re-run and compare.
+`\b(\d+)\s+errors?\b`, `\b(\d+)/(\d+)\b`. Reported as informational; with
+`audit --gates` they are verified against gate output (§16).
 
 ## 8. Repository hints
 
@@ -170,7 +170,8 @@ receives an insertion edit (Start = End+1).
 
 ## 12. Known limitations
 
-- Numeric gate claims are unverified without gate config.
+- Numeric gate claims are unverified unless `--gates` runs a gate config
+  (§16), and even then only count-shaped numbers are compared.
 - Anchor symbol extraction only reads the anchor's own line; symbols named on
   neighbouring lines are missed (deliberate: keeps false-`ok` risk low).
 - `?? dir/` untracked-dir shorthand in plans matches only if written
@@ -350,3 +351,44 @@ Rules:
   created; an existing file is never overwritten.
 - `--apply` writes the previewed content and then runs audit + sync
   computation on it, printing both counts (a fresh scaffold should be 0/0).
+
+## 16. Gate configuration (M6)
+
+Per-repo gate commands live in `.plansync.toml` at a candidate repo root
+(or next to the plan; `--gate-config` overrides). Accepted TOML subset:
+comments (`#`), blank lines, `[[gate]]` table headers, and `name = "…"` /
+`command = "…"` string fields (basic strings, `\"` and `\\` escapes only —
+anything else is a parse error). A gate without `command` is an error; a
+gate without `name` defaults to `gate N`.
+
+`audit --gates` loads the config, runs each command via `sh -c` in the
+config's directory (combined output captured, capped at 8 KB), and verifies
+count claims (§7) against the joined output:
+
+1. claim detail appears verbatim → `ok` ("matches gate output");
+2. else every number the detail carries appears in one count-shaped output
+   line → `ok` ("confirmed by gate output …") — "61 tests" is confirmed by
+   `OK=61 FAIL=0`;
+3. else, if the output has count-shaped lines → `stale` with the actual
+   numbers listed;
+4. else → stays `info` ("not confirmed by gates").
+
+A failing gate command is rendered as a `stale`-class finding and trips
+`--fail` (under the `stale` entry of `--fail-on`). Gate runs are included
+in `--json` output (`gates` array per report).
+
+`--fail-on` takes a comma-separated status list (default
+`stale,moved,missing`) from {ok, stale, moved, missing, unknown, info}.
+`--color auto|always|never` (default auto: colored when stdout is a
+character device) colorizes status words: stale/missing red, moved yellow,
+ok green, info cyan, unknown dim.
+
+## 17. opencode plugin (M6)
+
+`opencode/plansync.ts` exposes the CLI as tools `plansync_audit`,
+`plansync_brief`, `plansync_sync`, `plansync_log`, `plansync_init`,
+mirroring the Determinism plugin pattern: binary located via `PLANSYNC_BIN`
+→ `bin/plansync` → auto-build; commands run in the project directory so
+relative plan paths resolve against it; previews default, `apply` opts in.
+Register with
+`{ "plugin": ["file://…/plansync/opencode/plansync.ts"] }`.
