@@ -53,6 +53,11 @@ func TestParseProseNotGitEntry(t *testing.T) {
 		"git status calmoji/                             # review; ~330 KB committed\n",
 		" M not-a-slash-path\n",
 		"3 M and 4 N are constants\n",
+		// Fenced prose whose first token happens to be a staged-only XY
+		// spelling stays rejected (the in-fence bare-path carve-out is
+		// for worktree/untracked codes only).
+		"```\nM  hamlet\n```\n",
+		"```\nA  tale\n```\n",
 	}
 	for _, doc := range docs {
 		for _, c := range Parse(doc) {
@@ -215,6 +220,68 @@ func TestRepoHints(t *testing.T) {
 	}
 }
 
+func TestRepoHintsCodeRepoLabel(t *testing.T) {
+	// The omnical corpus declares repos inside bulleted metadata lists.
+	doc := "- **Date:** 2026-10-30\n" +
+		"- **Project:** `omnical`\n" +
+		"- **Code repo:** `~/router-dav` (submodule `rustical/`, branch `main` of\n" +
+		"  `Bytewheel/Omnical-Server`). This repo holds the plan only.\n"
+	hints := RepoHints(doc)
+	if len(hints) != 1 || hints[0] != "~/router-dav" {
+		t.Fatalf("want [~/router-dav], got %v", hints)
+	}
+}
+
+func TestRepoHintsBulletList(t *testing.T) {
+	doc := "**Repos:**\n" +
+		"- `~/router-dav` — Omnical-Code (CI, packaging, deploy)\n" +
+		"- `~/router-dav/rustical` — Omnical-Server, the code (landed as `e30c90d9`,\n" +
+		"  branch `main`, tree clean)\n" +
+		"- this repo — plans (no path backticks)\n" +
+		"\n" +
+		"Prose after the list. A stray `- `/not/a/repo` bullet with no label\n" +
+		"above it must not be collected.\n"
+	hints := RepoHints(doc)
+	want := []string{"~/router-dav", "~/router-dav/rustical"}
+	if len(hints) != len(want) {
+		t.Fatalf("hints mismatch: %v", hints)
+	}
+	for i, w := range want {
+		if hints[i] != w {
+			t.Errorf("hint %d: want %q got %q", i, w, hints[i])
+		}
+	}
+}
+
+func TestRepoHintsBulletListWithProseLabel(t *testing.T) {
+	doc := "**Repos** (same trio as `PLAN_NEXT_AGENT_APHY_IMPORT_RENDER.md`):\n" +
+		"- `~/router-dav/rustical` — Omnical-Server, all the code. Head at writing: `43af1493`, tree clean.\n" +
+		"- `~/router-dav` — Omnical-Code (CI, packaging, deploy).\n" +
+		"- this repo — plans.\n" +
+		"\n" +
+		"---\n"
+	hints := RepoHints(doc)
+	want := []string{"~/router-dav/rustical", "~/router-dav"}
+	if len(hints) != len(want) {
+		t.Fatalf("hints mismatch: %v", hints)
+	}
+	for i, w := range want {
+		if hints[i] != w {
+			t.Errorf("hint %d: want %q got %q", i, w, hints[i])
+		}
+	}
+}
+
+func TestRepoHintsSingularLabelDoesNotStartList(t *testing.T) {
+	doc := "**Working tree:** `~/router-dav` clean at `abc1234`\n" +
+		"\n" +
+		"- `/etc/passwd` — unrelated bullet list after a singular label\n"
+	hints := RepoHints(doc)
+	if len(hints) != 1 || hints[0] != "~/router-dav" {
+		t.Fatalf("want [~/router-dav], got %v", hints)
+	}
+}
+
 func TestSymbolsIgnoreProse(t *testing.T) {
 	line := "| import wiring | `crates/ical/src/calendar_object.rs:79` |"
 	syms := symbols(line, "crates/ical/src/calendar_object.rs")
@@ -232,5 +299,27 @@ func TestFencedCommandsProduceNoClaims(t *testing.T) {
 	doc := "```sh\nexport SSH_AUTH_SOCK=/home/user/.ssh/agent/s.9A30FBhmm9.agent\nexport GIT_SSH_COMMAND=\"ssh -o BatchMode=yes -i /home/user/.ssh/id_burningserenity -o IdentitiesOnly=yes\"\n```\n"
 	for _, c := range Parse(doc) {
 		t.Errorf("fenced command produced claim: %+v", c)
+	}
+}
+
+func TestParseFencedSubmoduleEntry(t *testing.T) {
+	// A dirty submodule is a bare directory name (" M rustical") — the
+	// line must join the SAME claim as the entries around it (a rejected
+	// line would split the block into two broken claims), and untracked
+	// root files ("?? notes") claim the same way.
+	doc := "```\n M omni-plugins/src/web.rs\n M rustical\n?? omni-plugin-currentrms/tests/targeting.rs\n```\n"
+	claims := Parse(doc)
+	if len(claims) != 1 {
+		t.Fatalf("want exactly 1 git-tree claim, got %d: %+v", len(claims), claims)
+	}
+	c := claims[0]
+	if c.Kind != KindGitTree {
+		t.Fatalf("unexpected kind %v", c.Kind)
+	}
+	if len(c.Entries) != 3 {
+		t.Fatalf("want 3 entries (submodule included), got %d: %+v", len(c.Entries), c.Entries)
+	}
+	if c.Entries[1].XY != " M" || c.Entries[1].Path != "rustical" {
+		t.Errorf("submodule entry mismatch: %+v", c.Entries[1])
 	}
 }

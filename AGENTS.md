@@ -159,7 +159,8 @@ claims in the shapes the grammar reads (full spec in `docs/FORMAT-SPEC.md`):
   ```
 
 - Declare the repo up front: `**Repo:** `path/to/repo`, branch `branch-name``
-  (also `**Working tree:**` or a `| Server | /abs/path | … |` handoff table).
+  (also `**Working tree:**`, `**Code repo:**`, a `**Repos:**` bullet list, or
+  a `| Server | /abs/path | … |` handoff table).
 - Reference code as backticked `path/file.rs:LINE` (or `:A-B`), and mention
   the symbol name on the same line — that is what enables verified re-anchoring:
 

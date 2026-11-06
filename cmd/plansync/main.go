@@ -46,8 +46,8 @@ Usage:
 Arguments are plan files or directories (default: .). Directories are walked
 for markdown files whose names look like plans (plan, roadmap, todo,
 continuation, next_agent). Repositories are discovered from the plan's own
-**Repo:** / **Working tree:** headers, handoff tables, and the plan's git
-worktree; --repo adds more.
+**Repo:** / **Code repo:** / **Working tree:** headers, **Repos:** bullet
+lists, handoff tables, and the plan's git worktree; --repo adds more.
 
 Flags:
   --repo path       candidate repository (repeatable)

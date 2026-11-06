@@ -110,8 +110,15 @@ must be dot/slash/colon-free and non-hex. Verified against local
 
 `RepoHints` scans the whole document for:
 
-- `**Repo:** `path`` / `**Repository:**` / `**Working tree:** `path`` —
-  bold-labelled headers (asterisks tolerated on either side of the colon);
+- `**Repo:** `path`` / `**Repository:**` / `**Working tree:** `path`` /
+  `**Code repo:** `path`` — bold-labelled headers (asterisks and a bullet
+  marker tolerated on either side of the colon);
+- plural labels — `**Repos:**`, `**Repositories:**`, `**Code repos:**`,
+  optionally with prose before the colon (`**Repos** (same trio as
+  `PLAN_X.md`):`) — announce a bullet list of repositories on the following
+  lines; each bullet's first backticked `/abs` or `~/` span is a hint.
+  Wrapped (indented) bullet-continuation lines keep the list open; any
+  non-indented non-bullet line closes it;
 - handoff table rows whose first cell is Server/Repo/Path/Plan/Packaging/
   Project — the first backticked `/abs` or `~/` span in the row.
 

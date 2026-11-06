@@ -63,7 +63,9 @@ var (
 		regexp.MustCompile(`\b(\d+)/(\d+)\b`),
 	}
 
-	repoLabelRe = regexp.MustCompile("(?i)^\\*{0,2}(repo|repository|working tree)\\*{0,2}\\s*:\\s*\\*{0,2}\\s*`?([^\\s`,;|*]+)")
+	repoLabelRe = regexp.MustCompile("(?i)^\\s*[-*]?\\s*\\*{0,2}(code repos?|repos|repositories|repo|repository|working tree)\\*{0,2}\\s*(\\([^)]*\\))?\\s*:\\s*\\*{0,2}\\s*`?([^\\s`,;|*]*)")
+	// A bullet line inside a Repos list: "- `~/router-dav` — description".
+	repoListLineRe = regexp.MustCompile(`^\s*[-*]\s+\S`)
 	tableRepoRe = regexp.MustCompile(`(?i)^\s*\|\s*(server|repo|path|plan|packaging|project)\s*\|`)
 )
 
@@ -143,7 +145,15 @@ func parseGitEntry(line string, inFence bool) (GitEntry, bool) {
 		return GitEntry{}, false
 	}
 	if inFence && !strings.ContainsAny(path, "/.") {
-		return GitEntry{}, false
+		// A bare path inside a fence is still a git entry when the XY is
+		// the worktree/untracked spelling (" M", " D", "??", …): root-level
+		// files and — the case that forced this — a dirty SUBMODULE
+		// (" M rustical") shows as a bare directory name. Staged-only
+		// spellings ("M  x", "A  x") stay filtered: prose inside fences
+		// far more often starts with a letter than with a space.
+		if xy[0] != ' ' && xy[0] != '?' {
+			return GitEntry{}, false
+		}
 	}
 	note := ""
 	if strings.HasPrefix(rest, "->") {
@@ -380,11 +390,38 @@ func RepoHints(doc string) []string {
 		seen[p] = true
 		out = append(out, p)
 	}
+	// A plural label ("Repos", "Code repos") announces a bullet list of
+	// repositories on the lines that follow; collect absolute backticked
+	// paths from those lines until the list ends.
+	inList := false
 	for _, raw := range strings.Split(doc, "\n") {
 		trimmed := strings.TrimSpace(raw)
 		if m := repoLabelRe.FindStringSubmatch(trimmed); m != nil {
-			add(m[2])
+			add(m[3])
+			if isPluralRepoLabel(m[1]) {
+				inList = true
+			}
 			continue
+		}
+		if inList {
+			if trimmed == "" {
+				continue
+			}
+			if repoListLineRe.MatchString(raw) {
+				for _, sp := range backtickSpans(raw) {
+					if strings.HasPrefix(sp, "/") || strings.HasPrefix(sp, "~/") {
+						add(sp)
+						break
+					}
+				}
+				continue
+			}
+			// An indented non-bullet line is a wrapped continuation of the
+			// previous bullet; it keeps the list open.
+			if raw[0] == ' ' || raw[0] == '\t' {
+				continue
+			}
+			inList = false
 		}
 		if tableRepoRe.MatchString(raw) {
 			for _, sp := range backtickSpans(raw) {
@@ -396,4 +433,15 @@ func RepoHints(doc string) []string {
 		}
 	}
 	return out
+}
+
+// isPluralRepoLabel reports whether a matched repo-label word (repoLabelRe
+// group 1) announces several repositories, i.e. may be followed by a bullet
+// list of paths rather than carrying the path on the label line itself.
+func isPluralRepoLabel(label string) bool {
+	switch strings.ToLower(label) {
+	case "repos", "code repos", "repositories":
+		return true
+	}
+	return false
 }

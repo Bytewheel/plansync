@@ -279,9 +279,10 @@ source if missing. Register it with:
 
 ## Repository discovery
 
-In order: `--repo` flags, the plan's own header hints (`**Repo:**`, `**Working
-tree:**`, `| Server | /path |` handoff-table rows), then the plan's git
-worktree. For the omnical corpus that means:
+In order: `--repo` flags, the plan's own header hints (`**Repo:**`,
+`**Code repo:**`, `**Working tree:**`, `**Repos:**` bullet lists,
+`| Server | /path |` handoff-table rows), then the plan's git worktree.
+Plans that declare none (roadmaps, decision docs) still need the flags:
 
 ```sh
 plansync audit ~/Documents/ByteWheel/omnical --repo ~/router-dav/rustical --repo ~/router-dav
